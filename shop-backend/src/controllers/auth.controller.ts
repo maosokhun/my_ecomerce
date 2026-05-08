@@ -5,11 +5,13 @@ import axios from 'axios';
 import prisma from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
+import { sendEmail } from '../lib/notifier';
 
 /** Letters from any script + spaces and common punctuation (Khmer/Latin names). */
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{M}\s'.-]+$/u;
 
 const normalizePhoneDigits = (raw: string): string => raw.replace(/\D/g, '');
+const forgotPasswordCodes = new Map<string, { code: string; expiresAt: number }>();
 
 const signToken = (payload: { id: string; email: string; role: string; name: string }) => {
   return jwt.sign(payload, process.env.JWT_SECRET!, {
@@ -21,8 +23,8 @@ export const register = async (req: Request, res: Response, next: NextFunction):
   try {
     const { name, email, password, phone } = req.body;
 
-    if (!name || !email || !password || !phone) {
-      throw new AppError('Name, email, phone and password are required', 400);
+    if (!name || !password || !phone) {
+      throw new AppError('Name, phone and password are required', 400);
     }
 
     if (!DISPLAY_NAME_PATTERN.test(String(name).trim())) {
@@ -34,8 +36,9 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       throw new AppError('Phone can contain numbers only (8-15 digits)', 400);
     }
 
-    const emailStr = String(email).trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr)) {
+    const rawEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const emailStr = rawEmail || null;
+    if (emailStr && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr)) {
       throw new AppError('Invalid email format: use something like name@example.com', 400);
     }
 
@@ -48,10 +51,12 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       throw new AppError('Password must include upper, lower, number, special character and be at least 8 characters', 400);
     }
 
-    const existing = await prisma.user.findUnique({ where: { email: emailStr } });
-    if (existing) {
-      throw new AppError('Email already registered', 409);
+    if (emailStr) {
+      const existingByEmail = await prisma.user.findUnique({ where: { email: emailStr } });
+      if (existingByEmail) throw new AppError('Email already registered', 409);
     }
+    const existingByPhone = await prisma.user.findFirst({ where: { phone: phoneDigits } });
+    if (existingByPhone) throw new AppError('Phone already registered', 409);
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -63,7 +68,7 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     // Create empty cart for new user
     await prisma.cart.create({ data: { userId: user.id } });
 
-    const token = signToken({ id: user.id, email: user.email, role: user.role, name: user.name });
+    const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
 
     res.status(201).json({
       success: true,
@@ -77,13 +82,18 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 
 export const login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const { identifier, email, phone, password } = req.body;
+    const loginId = String(identifier || email || phone || '').trim();
 
-    if (!email || !password) {
-      throw new AppError('Email and password are required', 400);
+    if (!loginId || !password) {
+      throw new AppError('Phone/email and password are required', 400);
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const digits = normalizePhoneDigits(loginId);
+    const isEmail = /@/.test(loginId);
+    const user = await prisma.user.findFirst({
+      where: isEmail ? { email: loginId.toLowerCase() } : { phone: digits || loginId },
+    });
 
     if (!user || !user.isActive) {
       throw new AppError('Invalid credentials', 401);
@@ -94,7 +104,7 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       throw new AppError('Invalid credentials', 401);
     }
 
-    const token = signToken({ id: user.id, email: user.email, role: user.role, name: user.name });
+    const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
 
     const { password: _, ...userWithoutPassword } = user;
     void _;
@@ -146,7 +156,7 @@ export const facebookLogin = async (req: Request, res: Response, next: NextFunct
       user = await prisma.user.update({ where: { id: user.id }, data: { avatar } });
     }
 
-    const token = signToken({ id: user.id, email: user.email, role: user.role, name: user.name });
+    const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
     const { password: _, ...userWithoutPassword } = user;
     void _;
 
@@ -275,6 +285,93 @@ export const changePassword = async (
     });
 
     res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requestPasswordResetByEmail = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) throw new AppError('Email is required', 400);
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw new AppError('Email not found', 404);
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    forgotPasswordCodes.set(email, { code, expiresAt: Date.now() + 10 * 60 * 1000 });
+
+    await sendEmail({
+      to: email,
+      subject: 'Your password reset code',
+      text: `Your verification code is ${code}. It expires in 10 minutes.`,
+      html: `<p>Your verification code is <b>${code}</b>. It expires in 10 minutes.</p>`,
+    });
+
+    res.json({ success: true, message: 'Verification code sent to email' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPasswordByEmailCode = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+    const newPassword = String(req.body?.newPassword || '');
+    if (!email || !code || !newPassword) throw new AppError('Email, code and newPassword are required', 400);
+
+    const saved = forgotPasswordCodes.get(email);
+    if (!saved || saved.expiresAt < Date.now() || saved.code !== code) {
+      throw new AppError('Invalid verification code', 400);
+    }
+
+    const hasLower = /[a-z]/.test(newPassword);
+    const hasUpper = /[A-Z]/.test(newPassword);
+    const hasNumber = /\d/.test(newPassword);
+    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
+    if (newPassword.length < 8 || !hasLower || !hasUpper || !hasNumber || !hasSpecial) {
+      throw new AppError('New password must include upper, lower, number, special character and be at least 8 characters', 400);
+    }
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) throw new AppError('User not found', 404);
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
+    forgotPasswordCodes.delete(email);
+
+    res.json({ success: true, message: 'Password reset successful' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPasswordByInfo = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const phone = normalizePhoneDigits(String(req.body?.phone || ''));
+    const newPassword = String(req.body?.newPassword || '');
+    if (!name || !phone || !newPassword) throw new AppError('Name, phone and newPassword are required', 400);
+
+    const hasLower = /[a-z]/.test(newPassword);
+    const hasUpper = /[A-Z]/.test(newPassword);
+    const hasNumber = /\d/.test(newPassword);
+    const hasSpecial = /[^A-Za-z0-9]/.test(newPassword);
+    if (newPassword.length < 8 || !hasLower || !hasUpper || !hasNumber || !hasSpecial) {
+      throw new AppError('New password must include upper, lower, number, special character and be at least 8 characters', 400);
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        name: { equals: name, mode: 'insensitive' },
+        phone,
+      },
+    });
+    if (!user) throw new AppError('Provided information is incorrect', 400);
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
+
+    res.json({ success: true, message: 'Password reset successful' });
   } catch (error) {
     next(error);
   }

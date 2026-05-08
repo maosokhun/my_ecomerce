@@ -33,9 +33,9 @@ api.interceptors.response.use((response) => response, (error) => Promise.reject(
 
 // Auth
 export const authApi = {
-  register: (data: { name: string; email: string; phone: string; password: string }) =>
+  register: (data: { name: string; email?: string; phone: string; password: string }) =>
     api.post('/auth/register', data),
-  login: (data: { email: string; password: string }) =>
+  login: (data: { identifier: string; password: string }) =>
     api.post('/auth/login', data),
   facebookLogin: (accessToken: string) =>
     api.post('/auth/facebook', { accessToken }),
@@ -44,6 +44,12 @@ export const authApi = {
     api.put('/auth/profile', data),
   changePassword: (data: { currentPassword: string; newPassword: string }) =>
     api.put('/auth/password', data),
+  requestPasswordResetByEmail: (data: { email: string }) =>
+    api.post('/auth/forgot-password/email/request', data),
+  resetPasswordByEmailCode: (data: { email: string; code: string; newPassword: string }) =>
+    api.post('/auth/forgot-password/email/verify', data),
+  resetPasswordByInfo: (data: { name: string; phone: string; newPassword: string }) =>
+    api.post('/auth/forgot-password/info/verify', data),
 };
 
 // Products
@@ -86,6 +92,8 @@ export const orderApi = {
     couponCode?: string;
     shippingCarrier?: 'VET' | 'JNT';
   }) => api.post('/orders', data),
+  previewCoupon: (data: { couponCode?: string; shippingCarrier?: 'VET' | 'JNT' }) =>
+    api.post('/orders/coupon-preview', data),
   getAll: (params?: Record<string, unknown>) => api.get('/orders', { params }),
   getById: (id: string) => api.get(`/orders/${id}`),
   getInvoice: (id: string, lang?: 'km' | 'en' | 'zh') =>
@@ -163,6 +171,10 @@ export const adminApi = {
   updateUser: (id: string, data: unknown) => api.put(`/admin/users/${id}`, data),
   getCoupons: () => api.get('/admin/coupons'),
   createCoupon: (data: unknown) => api.post('/admin/coupons', data),
+  updateCoupon: (id: string, data: unknown) => api.put(`/admin/coupons/${id}`, data),
+  deleteCoupon: (id: string) => api.delete(`/admin/coupons/${id}`),
+  getUnreadCounts: () => api.get('/admin/unread-counts'),
+  markSeen: (type: 'orders' | 'users' | 'leads') => api.post('/admin/mark-seen', { type }),
 };
 
 // Site Settings
@@ -181,4 +193,15 @@ export const uploadApi = {
       timeout: 120000,
     });
   },
+};
+
+export const supportApi = {
+  createInquiry: (data: { name: string; phone: string; question: string; priority?: 'ORDER' | 'PAYMENT' | 'PRODUCT' | 'GENERAL'; transcript?: string }) =>
+    api.post('/support/inquiries', data),
+  getInquiries: () => api.get('/support/inquiries'),
+};
+
+export const leadApi = {
+  subscribe: (data: { email: string; phone?: string }) => api.post('/leads/subscribe', data),
+  getAll: () => api.get('/leads'),
 };

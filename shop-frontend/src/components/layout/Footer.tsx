@@ -6,11 +6,12 @@ import { Facebook, Twitter, Instagram, Youtube, Mail, Phone, MapPin } from 'luci
 import toast from 'react-hot-toast';
 import { useLanguageStore } from '@/store/languageStore';
 import { t } from '@/lib/i18n';
-import { settingApi } from '@/lib/api';
+import { leadApi, settingApi } from '@/lib/api';
 
 export function Footer() {
   const { language } = useLanguageStore();
   const [newsletterEmail, setNewsletterEmail] = useState('');
+  const [newsletterPhone, setNewsletterPhone] = useState('');
   const [footerInfo, setFooterInfo] = useState<{
     brandName?: string;
     brandDescription?: string;
@@ -49,11 +50,17 @@ export function Footer() {
       .catch(() => {});
   }, []);
 
-  const handleNewsletter = (e: React.FormEvent) => {
+  const handleNewsletter = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newsletterEmail.trim()) return;
-    toast.success(t(language, 'newsletterThanks'));
-    setNewsletterEmail('');
+    try {
+      await leadApi.subscribe({ email: newsletterEmail.trim(), phone: newsletterPhone.trim() || undefined });
+      toast.success(t(language, 'newsletterThanks'));
+      setNewsletterEmail('');
+      setNewsletterPhone('');
+    } catch {
+      toast.error(language === 'km' ? 'ចុះឈ្មោះបរាជ័យ' : language === 'zh' ? '订阅失败' : 'Subscribe failed');
+    }
   };
 
   const brandName = footerInfo.brandName || 'SH-Shop';
@@ -99,7 +106,7 @@ export function Footer() {
   const paymentBadges =
     Array.isArray(footerInfo.paymentBadges) && footerInfo.paymentBadges.length > 0
       ? footerInfo.paymentBadges.filter(Boolean)
-      : ['Visa', 'MC', 'PayPal', 'Stripe'];
+      : ['Visa', 'MC', 'Bakong'];
   const socialLinks =
     Array.isArray(footerInfo.socialLinks) && footerInfo.socialLinks.length > 0
       ? footerInfo.socialLinks.filter((x) => x?.url)
@@ -108,7 +115,7 @@ export function Footer() {
   const displayAccountLinks = accountLinks.length >= 4 ? accountLinks : fallbackAccountLinks;
   const displayLegalLinks = legalLinks.length >= 2 ? legalLinks : fallbackLegalLinks;
   const displayPhones = phones.length >= 2 ? phones : ['+855 97 494 4390', '+855 88 545 9115'];
-  const displayPaymentBadges = paymentBadges.length >= 3 ? paymentBadges : ['Visa', 'MC', 'PayPal', 'Stripe'];
+  const displayPaymentBadges = paymentBadges.length >= 3 ? paymentBadges : ['Visa', 'MC', 'Bakong'];
   const displaySocialLinks =
     socialLinks.length >= 4
       ? socialLinks
@@ -196,14 +203,23 @@ export function Footer() {
             <div className="mt-6">
               <p className="text-sm text-gray-400 mb-3">{t(language, 'footerNewsletter')}</p>
               <form onSubmit={handleNewsletter} className="flex gap-2">
-                <input
-                  type="email"
-                  value={newsletterEmail}
-                  onChange={(e) => setNewsletterEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="flex-1 px-3 py-2 text-sm bg-surface-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
-                />
-                <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors">
+                <div className="flex-1 space-y-2">
+                  <input
+                    type="email"
+                    value={newsletterEmail}
+                    onChange={(e) => setNewsletterEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    className="w-full px-3 py-2 text-sm bg-surface-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
+                  />
+                  <input
+                    type="text"
+                    value={newsletterPhone}
+                    onChange={(e) => setNewsletterPhone(e.target.value)}
+                    placeholder={language === 'km' ? 'លេខទូរស័ព្ទ (ជម្រើស)' : language === 'zh' ? '手机号（可选）' : 'Phone (optional)'}
+                    className="w-full px-3 py-2 text-sm bg-surface-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary-500"
+                  />
+                </div>
+                <button type="submit" className="px-4 py-2 h-fit text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors">
                   {t(language, 'footerSubscribe')}
                 </button>
               </form>

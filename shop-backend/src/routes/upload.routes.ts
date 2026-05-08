@@ -2,11 +2,12 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { uploadImage } from '../lib/cloudinary';
 import { saveLocalProductImage } from '../lib/localImageUpload';
-import { authenticate, requireAdmin } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
+import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 
 const router = Router();
@@ -46,13 +47,16 @@ function isCloudinaryConfigured(): boolean {
 router.post(
   '/image',
   authenticate,
-  requireAdmin,
   upload.single('image'),
-  async (req: Request, res: Response, next: NextFunction) => {
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
       if (!req.file) throw new AppError('No image file provided', 400);
 
       const folder = String(req.body.folder || 'shop').replace(/[^a-zA-Z0-9_-]/g, '') || 'shop';
+      const isAvatarUpload = folder === 'avatars';
+      if (!isAvatarUpload && req.user?.role !== 'ADMIN') {
+        throw new AppError('Admin access required for this upload folder', 403);
+      }
 
       if (isCloudinaryConfigured()) {
         const result = await uploadImage(req.file.path, folder);

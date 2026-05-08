@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { generateOrderNumber, paginate, paginateResponse } from '../utils/helpers';
 import stripeClient from '../lib/stripe';
 import { getInvoiceDetails, sendInvoiceNotification } from '../lib/invoice';
+import { notifyAdminOrderEvent, notifyAdminOrderStatusChanged, notifyAdminUserCancelledOrder } from '../lib/adminNotifier';
 
 export const createOrder = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -68,7 +69,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     }
 
     const settings = await prisma.siteSettings.findUnique({ where: { id: 'default' } });
-    const legacyFee = settings?.shippingFee ?? 2.0;
+    const legacyFee = settings?.shippingFee ?? 1.0;
     const vetFee = settings?.shippingFeeVet ?? legacyFee;
     const jntFee = settings?.shippingFeeJnt ?? legacyFee;
 
@@ -177,6 +178,9 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     sendInvoiceNotification(order.id).catch((error) => {
       console.error('[Invoice] Notification failed:', error);
     });
+    notifyAdminOrderEvent(order.id, 'NEW_ORDER').catch((error) => {
+      console.error('[Admin Notify] New order notification failed:', error);
+    });
 
     res.status(201).json({
       success: true,
@@ -189,6 +193,59 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
             ? 'Use your Bakong app to complete payment to merchant KHQR/ID after order placement.'
             : undefined,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const previewCoupon = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { couponCode, shippingCarrier: rawCarrier } = req.body as {
+      couponCode?: string;
+      shippingCarrier?: string;
+    };
+    const cart = await prisma.cart.findUnique({
+      where: { userId: req.user!.id },
+      include: { items: { include: { product: true } } },
+    });
+    if (!cart || cart.items.length === 0) throw new AppError('Cart is empty', 400);
+
+    const subtotal = cart.items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+    const settings = await prisma.siteSettings.findUnique({ where: { id: 'default' } });
+    const legacyFee = settings?.shippingFee ?? 1.0;
+    const vetFee = settings?.shippingFeeVet ?? legacyFee;
+    const jntFee = settings?.shippingFeeJnt ?? legacyFee;
+    const carrierRaw = String(rawCarrier || 'VET').toUpperCase();
+    const shippingCarrier = carrierRaw === 'JNT' ? 'JNT' : 'VET';
+    const shippingCost = shippingCarrier === 'JNT' ? jntFee : vetFee;
+
+    let discount = 0;
+    let normalizedCouponCode: string | null = null;
+    if (couponCode && String(couponCode).trim()) {
+      normalizedCouponCode = String(couponCode).trim().toUpperCase();
+      const coupon = await prisma.coupon.findUnique({
+        where: { code: normalizedCouponCode, isActive: true },
+      });
+      if (!coupon) throw new AppError('Invalid coupon code', 400);
+      if (coupon.expiresAt && coupon.expiresAt < new Date()) throw new AppError('Coupon has expired', 400);
+      if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) throw new AppError('Coupon usage limit reached', 400);
+      if (coupon.minOrder && subtotal < coupon.minOrder) {
+        throw new AppError(`Minimum order is ${coupon.minOrder} for this coupon`, 400);
+      }
+      if (coupon.discountType === 'PERCENTAGE') {
+        discount = (subtotal * coupon.discount) / 100;
+        if (coupon.maxDiscount) discount = Math.min(discount, coupon.maxDiscount);
+      } else {
+        discount = coupon.discount;
+      }
+      discount = Math.max(0, Math.min(discount, subtotal));
+    }
+
+    const total = subtotal + shippingCost - discount;
+    res.json({
+      success: true,
+      data: { subtotal, shippingCost, discount, total, shippingCarrier, couponCode: normalizedCouponCode },
     });
   } catch (error) {
     next(error);
@@ -271,6 +328,9 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
       where: { id },
       data: { status: 'CANCELLED' },
     });
+    notifyAdminUserCancelledOrder(id).catch((error) => {
+      console.error('[Admin Notify] User cancel notification failed:', error);
+    });
 
     // Restore stock
     const orderWithItems = await prisma.order.findUnique({
@@ -334,6 +394,9 @@ export const confirmPayment = async (req: AuthRequest, res: Response, next: Next
     // Re-send invoice after payment confirmation to reflect paid status.
     sendInvoiceNotification(orderId).catch((error) => {
       console.error('[Invoice] Confirmation notification failed:', error);
+    });
+    notifyAdminOrderEvent(orderId, 'PAYMENT_PAID').catch((error) => {
+      console.error('[Admin Notify] Payment notification failed:', error);
     });
 
     res.json({ success: true, message: 'Payment confirmed' });
@@ -429,12 +492,23 @@ export const adminUpdateOrderStatus = async (req: AuthRequest, res: Response, ne
       throw new AppError('Invalid status', 400);
     }
 
+    const existing = await prisma.order.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!existing) throw new AppError('Order not found', 404);
+
     const data: Record<string, unknown> = { status };
     if (trackingNumber) data.trackingNumber = trackingNumber;
     if (status === 'SHIPPED') data.shippedAt = new Date();
     if (status === 'DELIVERED') data.deliveredAt = new Date();
 
     const order = await prisma.order.update({ where: { id }, data });
+    if (existing.status !== status) {
+      notifyAdminOrderStatusChanged(order.id, existing.status, status).catch((error) => {
+        console.error('[Admin Notify] Order status update notification failed:', error);
+      });
+    }
 
     res.json({ success: true, message: 'Order status updated', data: order });
   } catch (error) {

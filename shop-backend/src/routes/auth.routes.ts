@@ -1,5 +1,15 @@
 import { Router } from 'express';
-import { register, login, facebookLogin, getMe, updateProfile, changePassword } from '../controllers/auth.controller';
+import {
+  register,
+  login,
+  facebookLogin,
+  getMe,
+  updateProfile,
+  changePassword,
+  requestPasswordResetByEmail,
+  resetPasswordByEmailCode,
+  resetPasswordByInfo,
+} from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
@@ -10,5 +20,8 @@ router.post('/facebook', facebookLogin);
 router.get('/me', authenticate, getMe);
 router.put('/profile', authenticate, updateProfile);
 router.put('/password', authenticate, changePassword);
+router.post('/forgot-password/email/request', requestPasswordResetByEmail);
+router.post('/forgot-password/email/verify', resetPasswordByEmailCode);
+router.post('/forgot-password/info/verify', resetPasswordByInfo);
 
 export default router;

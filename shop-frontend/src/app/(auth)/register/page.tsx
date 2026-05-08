@@ -11,7 +11,6 @@ import { t } from '@/lib/i18n';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 
-/** Requires a normal domain with a dot (e.g. user@gmail.com), rejects user@gmail */
 const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function RegisterPage() {
@@ -40,7 +39,7 @@ export default function RegisterPage() {
       toast.error(t(language, 'invalidNameLettersOnly'));
       return;
     }
-    if (!EMAIL_FORMAT.test(form.email.trim())) {
+    if (form.email.trim() && !EMAIL_FORMAT.test(form.email.trim())) {
       toast.error(t(language, 'invalidEmailFormat'));
       return;
     }
@@ -62,7 +61,7 @@ export default function RegisterPage() {
       return;
     }
     try {
-      await register(form.name.trim(), form.email.trim(), phoneDigits, form.password);
+      await register(form.name.trim(), form.email.trim() || undefined, phoneDigits, form.password);
       toast.success(t(language, 'accountCreatedWelcome'));
       router.push('/');
     } catch (error: unknown) {
@@ -105,8 +104,7 @@ export default function RegisterPage() {
               type="email"
               value={form.email}
               onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-              placeholder="you@example.com"
-              required
+              placeholder={language === 'km' ? 'you@example.com (ស្រេចចិត្ត)' : language === 'zh' ? 'you@example.com（可选）' : 'you@example.com (optional)'}
               className="input"
             />
           </div>

@@ -68,12 +68,12 @@ const adminSettingsI18n: Record<UILang, Record<string, string>> = {
 const defaultForm = (): AdminSettingsForm => ({
   siteName: 'SH-Shop',
   siteTagline: 'Your trusted online store',
-  shippingFeeVet: 2,
-  shippingFeeJnt: 2,
+  shippingFeeVet: 1,
+  shippingFeeJnt: 1,
   header: {
     siteName: 'SH-Shop',
     logoLetter: 'S',
-    navLinks: [{ label: 'Blog', href: '/blog' }],
+    navLinks: [],
   },
   footer: {
     brandName: 'SH-Shop',
@@ -85,7 +85,7 @@ const defaultForm = (): AdminSettingsForm => ({
     shopLinks: [{ label: 'All Products', href: '/products' }],
     accountLinks: [{ label: 'My Account', href: '/dashboard' }],
     legalLinks: [{ label: 'Privacy', href: '/legal/privacy' }],
-    paymentBadges: ['Visa', 'MC', 'PayPal', 'Stripe'],
+    paymentBadges: ['Visa', 'MC', 'Bakong'],
     copyright: 'All rights reserved.',
   },
   homepage: {

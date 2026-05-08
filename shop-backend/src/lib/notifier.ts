@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import twilio from 'twilio';
+import axios from 'axios';
 
 interface EmailPayload {
   to: string;
@@ -11,6 +12,12 @@ interface EmailPayload {
 interface SmsPayload {
   to: string;
   text: string;
+}
+
+interface TelegramPayload {
+  chatId: string;
+  text: string;
+  botToken?: string;
 }
 
 export const sendEmail = async (payload: EmailPayload): Promise<boolean> => {
@@ -59,6 +66,21 @@ export const sendSms = async (payload: SmsPayload): Promise<boolean> => {
     from: fromPhone,
     to: payload.to,
     body: payload.text,
+  });
+
+  return true;
+};
+
+export const sendTelegramMessage = async (payload: TelegramPayload): Promise<boolean> => {
+  const token = payload.botToken || process.env.TELEGRAM_BOT_TOKEN;
+  if (!token || !payload.chatId || !payload.text) {
+    console.log('[Notify] Telegram not configured; skipped Telegram message');
+    return false;
+  }
+
+  await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+    chat_id: payload.chatId,
+    text: payload.text,
   });
 
   return true;

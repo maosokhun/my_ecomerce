@@ -183,7 +183,7 @@ function ProductsContent() {
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}
           exit={{ opacity: 0, height: 0 }}
-          className="card p-5 mb-6"
+          className="card p-5 mb-6 overflow-visible relative z-20"
         >
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 dark:text-white">{t(language, 'productsFilters')}</h3>
@@ -197,7 +197,7 @@ function ProductsContent() {
             )}
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 overflow-visible relative z-20">
             {/* Category */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1.5">{t(language, 'productsCategory')}</label>

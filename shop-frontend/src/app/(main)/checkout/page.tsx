@@ -49,6 +49,10 @@ export default function CheckoutPage() {
   });
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'bakong'>('card');
+  const [couponInput, setCouponInput] = useState('');
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
+  const [couponError, setCouponError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<{ id: string; orderNumber: string; total: number } | null>(null);
   const [khqrPayment, setKhqrPayment] = useState<{
@@ -172,7 +176,8 @@ export default function CheckoutPage() {
 
   const subtotal = cart?.cartTotal || 0;
   const shipping = shippingCarrier === 'JNT' ? shippingFees.jnt : shippingFees.vet;
-  const total = subtotal + shipping;
+  const discount = appliedCoupon?.discount || 0;
+  const total = Math.max(0, subtotal + shipping - discount);
 
   const carrierLabels = useMemo(
     () => ({
@@ -247,11 +252,13 @@ export default function CheckoutPage() {
     }
     setIsProcessing(true);
     try {
+      const normalizedCoupon = appliedCoupon?.code || '';
       const { data } = await orderApi.create({
         addressId: selectedAddressId || undefined,
         paymentMethod,
         notes,
         shippingCarrier,
+        couponCode: normalizedCoupon || undefined,
       });
       const orderId = data.data.order.id as string;
 
@@ -282,6 +289,53 @@ export default function CheckoutPage() {
       setIsProcessing(false);
     }
   };
+
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    setIsApplyingCoupon(true);
+    setCouponError('');
+    try {
+      const { data } = await orderApi.previewCoupon({ couponCode: code, shippingCarrier });
+      const preview = data.data as { couponCode?: string; discount?: number };
+      setCouponInput((preview.couponCode || code).toUpperCase());
+      setAppliedCoupon({
+        code: (preview.couponCode || code).toUpperCase(),
+        discount: Number(preview.discount || 0),
+      });
+      toast.success(language === 'km' ? 'បានអនុវត្ត Coupon' : language === 'zh' ? '优惠券已应用' : 'Coupon applied');
+    } catch (error: unknown) {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const errorText = msg || t(language, 'invalidCouponCode');
+      setCouponError(errorText);
+      setAppliedCoupon(null);
+      toast.error(errorText);
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
+
+  const handleClearCoupon = () => {
+    setCouponInput('');
+    setCouponError('');
+    setAppliedCoupon(null);
+  };
+
+  useEffect(() => {
+    if (!appliedCoupon?.code) return;
+    orderApi
+      .previewCoupon({ couponCode: appliedCoupon.code, shippingCarrier })
+      .then(({ data }) => {
+        const preview = data.data as { couponCode?: string; discount?: number };
+        setAppliedCoupon({
+          code: (preview.couponCode || appliedCoupon.code).toUpperCase(),
+          discount: Number(preview.discount || 0),
+        });
+      })
+      .catch(() => {
+        setAppliedCoupon(null);
+      });
+  }, [shippingCarrier, appliedCoupon?.code]);
 
   const handleCardPaymentSuccess = async () => {
     if (!cardPaymentOrder) return;
@@ -431,7 +485,9 @@ export default function CheckoutPage() {
                     </button>
                   ) : (
                     <form onSubmit={handleAddAddress} className="space-y-3 p-4 bg-gray-50 dark:bg-surface-800 rounded-xl">
-                      <h3 className="font-semibold text-sm">New Address</h3>
+                      <h3 className="font-semibold text-sm">
+                        {language === 'km' ? 'អាសយដ្ឋានថ្មី' : language === 'zh' ? '新地址' : 'New Address'}
+                      </h3>
                       <div className="grid sm:grid-cols-2 gap-3">
                         <select
                           required
@@ -541,8 +597,12 @@ export default function CheckoutPage() {
                         />
                       </div>
                       <div className="flex gap-2">
-                        <button type="submit" className="btn-primary text-sm">Save Address</button>
-                        <button type="button" onClick={() => setAddingAddress(false)} className="btn-secondary text-sm">Cancel</button>
+                        <button type="submit" className="btn-primary text-sm">
+                          {language === 'km' ? 'រក្សាទុកអាសយដ្ឋាន' : language === 'zh' ? '保存地址' : 'Save Address'}
+                        </button>
+                        <button type="button" onClick={() => setAddingAddress(false)} className="btn-secondary text-sm">
+                          {language === 'km' ? 'បោះបង់' : language === 'zh' ? '取消' : 'Cancel'}
+                        </button>
                       </div>
                     </form>
                   )}
@@ -563,7 +623,7 @@ export default function CheckoutPage() {
               <motion.div key="review" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
                 <div className="card p-6">
                   <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-5 flex items-center gap-2">
-                    <Package className="w-5 h-5 text-primary-600" /> Review Your Order
+                    <Package className="w-5 h-5 text-primary-600" /> {language === 'km' ? 'ពិនិត្យការបញ្ជាទិញ' : language === 'zh' ? '确认订单' : 'Review Your Order'}
                   </h2>
 
                   <div className="mb-6">
@@ -634,8 +694,12 @@ export default function CheckoutPage() {
                   </div>
 
                   <div className="flex gap-3 mt-5">
-                    <button onClick={() => setStep(0)} className="btn-secondary flex-1">Back</button>
-                    <button onClick={() => setStep(2)} className="btn-primary flex-1">Continue to Payment</button>
+                    <button onClick={() => setStep(0)} className="btn-secondary flex-1">
+                      {language === 'km' ? 'ថយក្រោយ' : language === 'zh' ? '返回' : 'Back'}
+                    </button>
+                    <button onClick={() => setStep(2)} className="btn-primary flex-1">
+                      {language === 'km' ? 'បន្តទៅបង់ប្រាក់' : language === 'zh' ? '继续付款' : 'Continue to Payment'}
+                    </button>
                   </div>
                 </div>
               </motion.div>
@@ -650,8 +714,16 @@ export default function CheckoutPage() {
                   </h2>
 
                   <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 mb-5">
-                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-1">Choose Payment Method</p>
-                    <p className="text-xs text-blue-600 dark:text-blue-400">You can pay by Visa/Master card or Bakong.</p>
+                    <p className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-1">
+                      {language === 'km' ? 'ជ្រើសរើសវិធីបង់ប្រាក់' : language === 'zh' ? '选择支付方式' : 'Choose Payment Method'}
+                    </p>
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                      {language === 'km'
+                        ? 'អ្នកអាចបង់តាម Visa/Master card ឬ Bakong'
+                        : language === 'zh'
+                          ? '您可以使用 Visa/Master 卡或 Bakong 支付'
+                          : 'You can pay by Visa/Master card or Bakong.'}
+                    </p>
                   </div>
 
                   <div className="grid sm:grid-cols-2 gap-3 mb-5">
@@ -666,9 +738,11 @@ export default function CheckoutPage() {
                     >
                       <div className="flex items-center gap-2 mb-1">
                         <CreditCard className="w-4 h-4 text-primary-600" />
-                        <p className="font-semibold text-sm text-gray-900 dark:text-white">Card (Visa/Master)</p>
+                        <p className="font-semibold text-sm text-gray-900 dark:text-white">Visa/Master card</p>
                       </div>
-                      <p className="text-xs text-gray-500">Secure card payment via Stripe.</p>
+                      <p className="text-xs text-gray-500">
+                        {language === 'km' ? 'ការទូទាត់មានសុវត្ថិភាពតាម Visa/Master card' : language === 'zh' ? '通过 Visa/Master 卡安全支付' : 'Secure payment via Visa/Master card.'}
+                      </p>
                     </button>
                     <button
                       type="button"
@@ -690,21 +764,29 @@ export default function CheckoutPage() {
                   {paymentMethod === 'card' ? (
                     <div className="space-y-3 mb-5">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Card Number</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                          {language === 'km' ? 'លេខកាត' : language === 'zh' ? '卡号' : 'Card Number'}
+                        </label>
                         <input type="text" placeholder="4242 4242 4242 4242" className="input text-sm" defaultValue="4242 4242 4242 4242" />
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Expiry Date</label>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                            {language === 'km' ? 'ថ្ងៃផុតកំណត់' : language === 'zh' ? '到期日' : 'Expiry Date'}
+                          </label>
                           <input type="text" placeholder="MM/YY" className="input text-sm" defaultValue="12/28" />
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">CVC</label>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                            CVC
+                          </label>
                           <input type="text" placeholder="123" className="input text-sm" defaultValue="123" />
                         </div>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Name on Card</label>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                          {language === 'km' ? 'ឈ្មោះលើកាត' : language === 'zh' ? '持卡人姓名' : 'Name on Card'}
+                        </label>
                         <input type="text" placeholder="John Doe" className="input text-sm" defaultValue={user?.name} />
                       </div>
                     </div>
@@ -720,19 +802,23 @@ export default function CheckoutPage() {
                         rel="noreferrer"
                         className="inline-block mt-2 text-xs font-medium text-primary-600 hover:underline"
                       >
-                        Open Bakong official website
+                        {language === 'km' ? 'បើកគេហទំព័រ Bakong' : language === 'zh' ? '打开 Bakong 官网' : 'Open Bakong official website'}
                       </a>
                     </div>
                   )}
 
                   <div className="flex gap-3">
-                    <button onClick={() => setStep(1)} className="btn-secondary flex-1">Back</button>
+                    <button onClick={() => setStep(1)} className="btn-secondary flex-1">
+                      {language === 'km' ? 'ថយក្រោយ' : language === 'zh' ? '返回' : 'Back'}
+                    </button>
                     <button
                       onClick={handlePlaceOrder}
                       disabled={isProcessing}
                       className="btn-primary flex-1"
                     >
-                      {isProcessing ? 'Processing...' : `Place Order — ${formatPrice(total)}`}
+                      {isProcessing
+                        ? (language === 'km' ? 'កំពុងដំណើរការ...' : language === 'zh' ? '处理中...' : 'Processing...')
+                        : `${language === 'km' ? 'ដាក់ការបញ្ជាទិញ' : language === 'zh' ? '提交订单' : 'Place Order'} — ${formatPrice(total)}`}
                     </button>
                   </div>
                 </div>
@@ -755,15 +841,27 @@ export default function CheckoutPage() {
                 >
                   <CheckCircle className="w-10 h-10 text-green-600" />
                 </motion.div>
-                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Order Confirmed!</h2>
-                <p className="text-gray-500 mb-1">Thank you for your purchase, {user?.name}!</p>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                  {language === 'km' ? 'ការបញ្ជាទិញបានបញ្ជាក់!' : language === 'zh' ? '订单已确认！' : 'Order Confirmed!'}
+                </h2>
+                <p className="text-gray-500 mb-1">
+                  {language === 'km'
+                    ? `អរគុណសម្រាប់ការទិញទំនិញ, ${user?.name}!`
+                    : language === 'zh'
+                      ? `感谢您的购买，${user?.name}！`
+                      : `Thank you for your purchase, ${user?.name}!`}
+                </p>
                 <p className="text-sm font-mono font-bold text-primary-600 mt-3 mb-1">{completedOrder.orderNumber}</p>
                 <p className="text-gray-500 text-sm">Total: <span className="font-bold text-gray-900 dark:text-white">{formatPrice(completedOrder.total)}</span></p>
                 <p className="text-sm text-gray-400 mt-3">A confirmation email has been sent to {user?.email}</p>
 
                 <div className="flex gap-3 justify-center mt-8">
-                  <button onClick={() => router.push('/dashboard/orders')} className="btn-primary">View My Orders</button>
-                  <button onClick={() => router.push('/products')} className="btn-secondary">Continue Shopping</button>
+                  <button onClick={() => router.push('/dashboard/orders')} className="btn-primary">
+                    {language === 'km' ? 'មើលការបញ្ជាទិញ' : language === 'zh' ? '查看我的订单' : 'View My Orders'}
+                  </button>
+                  <button onClick={() => router.push('/products')} className="btn-secondary">
+                    {language === 'km' ? 'បន្តទិញ' : language === 'zh' ? '继续购物' : 'Continue Shopping'}
+                  </button>
                 </div>
               </motion.div>
             )}
@@ -774,6 +872,30 @@ export default function CheckoutPage() {
         {step < 3 && (
           <div className="card p-5 h-fit">
             <h3 className="font-bold text-gray-900 dark:text-white mb-4">{t(language, 'orderSummary')}</h3>
+            <div className="mb-3">
+              <label className="block text-xs text-gray-500 mb-1">{t(language, 'couponCode')}</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={couponInput}
+                  onChange={(e) => {
+                    setCouponInput(e.target.value);
+                    setCouponError('');
+                  }}
+                  placeholder="WELCOME20"
+                  className="input text-xs h-9 flex-1"
+                />
+                <button onClick={handleApplyCoupon} disabled={isApplyingCoupon} className="btn-secondary text-xs h-9 px-3">
+                  {isApplyingCoupon ? '...' : t(language, 'apply')}
+                </button>
+                {couponInput && (
+                  <button onClick={handleClearCoupon} className="btn-secondary text-xs h-9 px-2">
+                    {t(language, 'cancel')}
+                  </button>
+                )}
+              </div>
+              {couponError && <p className="text-xs text-red-500 mt-1">{couponError}</p>}
+            </div>
             <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
               {cart?.items.map((item) => (
                 <div key={item.id} className="flex justify-between">
@@ -794,6 +916,14 @@ export default function CheckoutPage() {
                     {shipping === 0 ? t(language, 'freeUpper') : formatPrice(shipping)}
                   </span>
                 </div>
+                {appliedCoupon && (
+                  <div className="flex justify-between text-green-600">
+                    <span>
+                      {language === 'km' ? 'បញ្ចុះតម្លៃ' : language === 'zh' ? '优惠' : 'Discount'} ({appliedCoupon.code})
+                    </span>
+                    <span>-{formatPrice(appliedCoupon.discount)}</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -831,9 +961,12 @@ export default function CheckoutPage() {
         <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm card p-5">
             <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-              <QrCode className="w-5 h-5 text-primary-600" /> Scan KHQR to Pay
+              <QrCode className="w-5 h-5 text-primary-600" /> {language === 'km' ? 'ស្កេន KHQR ដើម្បីបង់' : language === 'zh' ? '扫码 KHQR 付款' : 'Scan KHQR to Pay'}
             </h3>
-            <p className="text-sm text-gray-500 mb-3">Amount: <span className="font-semibold text-gray-900 dark:text-white">{formatPrice(khqrPayment.amount)}</span></p>
+            <p className="text-sm text-gray-500 mb-3">
+              {language === 'km' ? 'ចំនួនទឹកប្រាក់' : language === 'zh' ? '金额' : 'Amount'}:{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">{formatPrice(khqrPayment.amount)}</span>
+            </p>
             <div className="relative w-full aspect-square bg-white rounded-xl p-3 border border-gray-200 overflow-hidden">
               <Image 
                 src={khqrPayment.qrImageUrl} 
@@ -842,8 +975,12 @@ export default function CheckoutPage() {
                 className="object-contain p-2" 
               />
             </div>
-            <p className="text-xs text-gray-500 mt-2">Ref: {khqrPayment.reference}</p>
-            <p className="text-xs text-gray-500">Expires: {new Date(khqrPayment.expiresAt).toLocaleTimeString()}</p>
+            <p className="text-xs text-gray-500 mt-2">
+              {language === 'km' ? 'លេខយោង' : language === 'zh' ? '参考号' : 'Ref'}: {khqrPayment.reference}
+            </p>
+            <p className="text-xs text-gray-500">
+              {language === 'km' ? 'ផុតកំណត់' : language === 'zh' ? '过期时间' : 'Expires'}: {new Date(khqrPayment.expiresAt).toLocaleTimeString()}
+            </p>
             <div className="grid grid-cols-2 gap-2 mt-4">
               <button
                 onClick={async () => {
@@ -856,10 +993,10 @@ export default function CheckoutPage() {
                 }}
                 className="btn-secondary text-sm"
               >
-                I Paid (Test)
+                {language === 'km' ? 'ខ្ញុំបានបង់ (សាកល្បង)' : language === 'zh' ? '我已支付（测试）' : 'I Paid (Test)'}
               </button>
               <button onClick={() => setKhqrPayment(null)} className="btn-secondary text-sm">
-                Close
+                {language === 'km' ? 'បិទ' : language === 'zh' ? '关闭' : 'Close'}
               </button>
             </div>
           </div>

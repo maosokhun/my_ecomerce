@@ -110,7 +110,10 @@ export function Navbar() {
   ];
   const extraNavLinks =
     Array.isArray(headerInfo.navLinks)
-      ? headerInfo.navLinks.filter((x) => x?.label && x?.href).slice(0, 4)
+      ? headerInfo.navLinks
+          .filter((x) => x?.label && x?.href)
+          .filter((x) => String(x.href).toLowerCase() !== '/blog')
+          .slice(0, 4)
       : [];
   const brandName = headerInfo.siteName || 'SH-Shop';
   const logoLetter = (headerInfo.logoLetter || brandName.slice(0, 1) || 'S').slice(0, 1).toUpperCase();

@@ -42,7 +42,7 @@ export const authenticate = async (
       return;
     }
 
-    req.user = { id: user.id, email: user.email, role: user.role, name: user.name };
+    req.user = { id: user.id, email: user.email || '', role: user.role, name: user.name };
     next();
   } catch (error) {
     res.status(401).json({ success: false, message: 'Invalid or expired token' });

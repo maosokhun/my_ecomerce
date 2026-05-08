@@ -119,7 +119,21 @@ export const getInvoiceDetails = async (orderId: string, lang: AppLang = 'km'): 
     )
     .join('\n');
 
-  // Invoice shows Khmer administrative lines only (checkout UI no longer surfaces road/city/zip there).
+  const shippingSnapshot =
+    order.shippingAddress && typeof order.shippingAddress === 'object'
+      ? (order.shippingAddress as {
+          province?: string;
+          district?: string;
+          commune?: string;
+          village?: string;
+          roadNumber?: string;
+          street?: string;
+          city?: string;
+          state?: string;
+          zipCode?: string;
+        })
+      : null;
+
   const localized = order.address
     ? await resolveAddressByLang(
         {
@@ -131,13 +145,33 @@ export const getInvoiceDetails = async (orderId: string, lang: AppLang = 'km'): 
         lang
       )
     : null;
-  const shippingAddress =
-    localized ||
-    (order.address
-      ? [order.address.province, order.address.district, order.address.commune, order.address.village]
-          .filter(Boolean)
-          .join(', ')
-      : 'Not provided');
+  const areaParts = localized
+    ? localized.split(',').map((x) => x.trim()).filter(Boolean)
+    : [
+        order.address?.province,
+        order.address?.district,
+        order.address?.commune,
+        order.address?.village,
+        shippingSnapshot?.province,
+        shippingSnapshot?.district,
+        shippingSnapshot?.commune,
+        shippingSnapshot?.village,
+      ].filter(Boolean) as string[];
+  const uniqueAreaParts = Array.from(new Set(areaParts.map((x) => x.trim()).filter(Boolean)));
+  const roadParts = [
+    order.address?.roadNumber,
+    order.address?.street,
+    shippingSnapshot?.roadNumber,
+    shippingSnapshot?.street,
+  ]
+    .filter(Boolean)
+    .map((x) => String(x).trim())
+    .filter(Boolean);
+  const extraParts = [shippingSnapshot?.city, shippingSnapshot?.state, shippingSnapshot?.zipCode]
+    .filter(Boolean)
+    .map((x) => String(x).trim())
+    .filter(Boolean);
+  const shippingAddress = [...uniqueAreaParts, ...roadParts, ...extraParts].join(', ') || 'Not provided';
 
 
   const shippingCarrierLabel =
@@ -225,7 +259,7 @@ export const getInvoiceDetails = async (orderId: string, lang: AppLang = 'km'): 
     orderNumber: order.orderNumber,
     createdAt: order.createdAt.toISOString(),
     customerName: order.user.name,
-    customerEmail: order.user.email,
+    customerEmail: order.user.email || '',
     customerPhone: order.user.phone,
     shippingAddress,
     paymentMethod: order.paymentMethod || 'N/A',

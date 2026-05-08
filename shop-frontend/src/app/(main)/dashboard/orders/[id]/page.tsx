@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronRight, Download, FileText, Package, Printer, QrCode, CreditCard } from 'lucide-react';
+import { ChevronRight, Download, FileText, Package, Printer, QrCode, CreditCard, XCircle } from 'lucide-react';
 import Image from 'next/image';
 import { Invoice, Order } from '@/types';
 import { orderApi, paymentApi } from '@/lib/api';
@@ -32,6 +32,7 @@ export default function OrderDetailsPage() {
     amount: number;
   } | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'bakong'>('card');
 
   const parseOrderIdFromRoute = (raw: string) => {
     if (!raw) return raw;
@@ -266,7 +267,10 @@ export default function OrderDetailsPage() {
 
     Promise.all([orderApi.getById(id), orderApi.getInvoice(id, language)])
       .then(([orderRes, invoiceRes]) => {
-        setOrder(orderRes.data.data || null);
+        const nextOrder = orderRes.data.data || null;
+        setOrder(nextOrder);
+        const method = String(nextOrder?.paymentMethod || '').toLowerCase();
+        setSelectedPaymentMethod(method === 'bakong' ? 'bakong' : 'card');
         setInvoice(invoiceRes.data.data || null);
       })
       .catch(() => {
@@ -296,13 +300,13 @@ export default function OrderDetailsPage() {
       }
     }, 4000);
     return () => clearInterval(poll);
-  }, [khqrPayment]);
+  }, [khqrPayment, language]);
 
   const handlePayNow = async () => {
     if (!order) return;
     setIsPaying(true);
     try {
-      if (order.paymentMethod === 'bakong') {
+      if (selectedPaymentMethod === 'bakong') {
         const { data } = await paymentApi.createKhqr(order.id);
         setKhqrPayment({
           orderId: order.id,
@@ -319,6 +323,26 @@ export default function OrderDetailsPage() {
       toast.error('Failed to initiate payment');
     } finally {
       setIsPaying(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!order) return;
+    const ok = window.confirm(
+      language === 'km'
+        ? 'តើអ្នកចង់បោះបង់ការបញ្ជាទិញនេះមែនទេ?'
+        : language === 'zh'
+          ? '确定要取消此订单吗？'
+          : 'Are you sure you want to cancel this order?'
+    );
+    if (!ok) return;
+    try {
+      await orderApi.cancel(order.id);
+      const { data: orderData } = await orderApi.getById(order.id);
+      setOrder(orderData.data);
+      toast.success(language === 'km' ? 'បានបោះបង់កម្មង់' : language === 'zh' ? '订单已取消' : 'Order cancelled');
+    } catch {
+      toast.error(language === 'km' ? 'បោះបង់មិនបាន' : language === 'zh' ? '取消失败' : 'Cancel failed');
     }
   };
 
@@ -379,14 +403,50 @@ export default function OrderDetailsPage() {
               </span>
             </div>
             {order.paymentStatus === 'PENDING' && (
-              <button
-                onClick={handlePayNow}
-                disabled={isPaying}
-                className="btn-primary py-2 px-4 text-sm flex items-center gap-2 shadow-md shadow-primary-500/20"
-              >
-                {order.paymentMethod === 'bakong' ? <QrCode className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-                {isPaying ? '...' : t(language, 'payNow')}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center rounded-xl border border-gray-200 dark:border-gray-700 p-1 bg-white dark:bg-surface-900">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPaymentMethod('card')}
+                    className={`px-3 py-1.5 text-xs rounded-lg ${
+                      selectedPaymentMethod === 'card'
+                        ? 'bg-primary-600 text-white'
+                        : 'text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    Visa/Master
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPaymentMethod('bakong')}
+                    className={`px-3 py-1.5 text-xs rounded-lg ${
+                      selectedPaymentMethod === 'bakong'
+                        ? 'bg-primary-600 text-white'
+                        : 'text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    Bakong
+                  </button>
+                </div>
+                <button
+                  onClick={handlePayNow}
+                  disabled={isPaying}
+                  className="btn-primary py-2 px-4 text-sm flex items-center gap-2 shadow-md shadow-primary-500/20"
+                >
+                  {selectedPaymentMethod === 'bakong' ? <QrCode className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
+                  {isPaying ? '...' : t(language, 'payNow')}
+                </button>
+                {(order.status === 'PENDING' || order.status === 'CONFIRMED') && (
+                  <button
+                    type="button"
+                    onClick={handleCancelOrder}
+                    className="btn-secondary py-2 px-4 text-sm flex items-center gap-2 text-red-600 dark:text-red-400"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    {language === 'km' ? 'បោះបង់កម្មង់' : language === 'zh' ? '取消订单' : 'Cancel order'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -439,11 +499,11 @@ export default function OrderDetailsPage() {
           </div>
         </div>
         {order.paymentStatus === 'PENDING' && (
-          <div className="mt-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-800 flex items-center justify-center">
-              <CreditCard className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+          <div className="mt-4 p-3 rounded-lg border border-gray-200 dark:border-gray-700 flex items-center gap-3">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 dark:bg-surface-800 flex items-center justify-center">
+              <CreditCard className="w-4 h-4 text-gray-500 dark:text-gray-300" />
             </div>
-            <p className="text-sm text-amber-800 dark:text-amber-300">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
               {t(language, 'unpaidWarning')}
             </p>
           </div>

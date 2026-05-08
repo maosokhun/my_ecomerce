@@ -6,6 +6,11 @@ const defaultFees = (base: number) => ({
   shippingFeeVet: base,
   shippingFeeJnt: base,
 });
+const minFee = (value: unknown, fallback: number): number => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, n);
+};
 
 const defaultLayoutInfo = (siteName = 'SH-Shop') => ({
   header: {
@@ -86,7 +91,7 @@ export const getSettings = async (req: Request, res: Response) => {
         data: {
           id: 'default',
           siteName: 'SH-Shop',
-          ...defaultFees(2.0),
+          ...defaultFees(1.0),
           heroImages: [],
           footerInfo: defaultLayoutInfo('SH-Shop'),
         },
@@ -117,18 +122,18 @@ export const updateSettings = async (req: Request, res: Response) => {
       where: { id: 'default' },
       update: {
         ...(siteName && { siteName }),
-        ...(legacy !== undefined && { shippingFee: legacy }),
-        ...(vet !== undefined && { shippingFeeVet: vet }),
-        ...(jnt !== undefined && { shippingFeeJnt: jnt }),
+        ...(legacy !== undefined && { shippingFee: minFee(legacy, 1) }),
+        ...(vet !== undefined && { shippingFeeVet: minFee(vet, 1) }),
+        ...(jnt !== undefined && { shippingFeeJnt: minFee(jnt, 1) }),
         ...(heroImages !== undefined && { heroImages }),
         ...(footerInfo !== undefined && { footerInfo }),
       },
       create: {
         id: 'default',
         siteName: siteName || 'SH-Shop',
-        shippingFee: legacy ?? 2.0,
-        shippingFeeVet: vet ?? legacy ?? 2.0,
-        shippingFeeJnt: jnt ?? legacy ?? 2.0,
+        shippingFee: minFee(legacy, 1.0),
+        shippingFeeVet: minFee(vet ?? legacy, 1.0),
+        shippingFeeJnt: minFee(jnt ?? legacy, 1.0),
         heroImages: heroImages || [],
         footerInfo: footerInfo || defaultLayoutInfo(siteName || 'SH-Shop'),
       },

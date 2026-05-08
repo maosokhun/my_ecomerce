@@ -12,6 +12,8 @@ import { useThemeStore } from '@/store/themeStore';
 import { useAdminLanguageStore } from '@/store/adminLanguageStore';
 import { authApi } from '@/lib/api';
 import { adminT } from '@/lib/admin-i18n';
+import { adminApi } from '@/lib/api';
+import toast from 'react-hot-toast';
 
 const navItems = [
   { href: '/admin', icon: LayoutDashboard, key: 'navDashboard' },
@@ -19,6 +21,8 @@ const navItems = [
   { href: '/admin/categories', icon: FolderTree, key: 'navCategories' },
   { href: '/admin/orders', icon: ShoppingCart, key: 'navOrders' },
   { href: '/admin/users', icon: Users, key: 'navUsers' },
+  { href: '/admin/leads', icon: Users, key: 'navLeads' },
+  { href: '/admin/support-inbox', icon: Users, key: 'navSupportInbox' },
   { href: '/admin/coupons', icon: Tag, key: 'navCoupons' },
   { href: '/admin/settings', icon: Settings, key: 'navSettings' },
 ];
@@ -36,6 +40,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [langOpen, setLangOpen] = useState(false);
   const [compactSidebar, setCompactSidebar] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [liveCounts, setLiveCounts] = useState<{ orders: number | null; users: number | null; leads: number | null }>({
+    orders: null,
+    users: null,
+    leads: null,
+  });
+  const [badgeFlash, setBadgeFlash] = useState<{ orders: boolean; users: boolean; leads: boolean }>({
+    orders: false,
+    users: false,
+    leads: false,
+  });
 
   useEffect(() => {
     if (!isAuthChecked) return;
@@ -60,6 +74,74 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
+
+  useEffect(() => {
+    if (!isAuthChecked || (!adminUser && user?.role !== 'ADMIN')) return;
+    let mounted = true;
+    let prevLeads = -1;
+    let prevOrders = -1;
+    let prevUsers = -1;
+    const pull = async () => {
+      try {
+        const { data } = await adminApi.getUnreadCounts();
+        const counts = data.data || {};
+        if (!mounted) return;
+        setLiveCounts({
+          orders: Number(counts.orders || 0),
+          users: Number(counts.users || 0),
+          leads: Number(counts.leads || 0),
+        });
+        const nextOrders = Number(counts.orders || 0);
+        const nextUsers = Number(counts.users || 0);
+        const nextLeads = Number(counts.leads || 0);
+        if (prevOrders >= 0 && nextOrders > prevOrders) {
+          setBadgeFlash((prev) => ({ ...prev, orders: true }));
+          setTimeout(() => setBadgeFlash((prev) => ({ ...prev, orders: false })), 1200);
+        }
+        if (prevUsers >= 0 && nextUsers > prevUsers) {
+          setBadgeFlash((prev) => ({ ...prev, users: true }));
+          setTimeout(() => setBadgeFlash((prev) => ({ ...prev, users: false })), 1200);
+        }
+        if (prevLeads >= 0 && nextLeads > prevLeads) {
+          setBadgeFlash((prev) => ({ ...prev, leads: true }));
+          setTimeout(() => setBadgeFlash((prev) => ({ ...prev, leads: false })), 1200);
+        }
+        if (prevLeads >= 0 && Number(counts.leads || 0) > prevLeads) {
+          toast.success(language === 'km' ? 'មាន subscriber ថ្មី' : language === 'zh' ? '有新的订阅用户' : 'New subscriber arrived');
+        }
+        prevOrders = nextOrders;
+        prevUsers = nextUsers;
+        prevLeads = nextLeads;
+      } catch {
+        // ignore
+      }
+    };
+    pull();
+    const timer = setInterval(pull, 8000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [isAuthChecked, adminUser, user?.role, language]);
+
+  useEffect(() => {
+    if (!isAuthChecked || (!adminUser && user?.role !== 'ADMIN')) return;
+    const type = pathname === '/admin/orders'
+      ? 'orders'
+      : pathname === '/admin/users'
+        ? 'users'
+        : pathname === '/admin/leads'
+          ? 'leads'
+          : null;
+    if (!type) return;
+
+    // Same behavior as chat unread: open page => mark seen immediately.
+    adminApi.markSeen(type).catch(() => {});
+    setLiveCounts((prev) => ({
+      ...prev,
+      [type]: 0,
+    }));
+  }, [pathname, isAuthChecked, adminUser, user?.role]);
 
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 8);
@@ -210,7 +292,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <span className={`w-6 h-6 flex items-center justify-center ${isActive ? 'text-white' : 'text-gray-500 group-hover:text-gray-700 dark:group-hover:text-gray-200'}`}>
                     <Icon className="w-[18px] h-[18px]" />
                   </span>
-                  {!compactSidebar && label}
+                  {!compactSidebar && (
+                    <span className="flex items-center justify-between w-full">
+                      <span>{label}</span>
+                      {(href === '/admin/orders' || href === '/admin/users' || href === '/admin/leads') && (
+                        <span
+                          className={`ml-2 min-w-5 h-5 px-1 rounded-full text-[10px] font-semibold inline-flex items-center justify-center ${
+                            ((href === '/admin/orders' ? (liveCounts.orders ?? 0) : href === '/admin/users' ? (liveCounts.users ?? 0) : (liveCounts.leads ?? 0)) > 0)
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                              : 'bg-gray-100 text-gray-500 dark:bg-surface-800 dark:text-gray-400'
+                          }`}
+                        >
+                          <span
+                            className={
+                              (href === '/admin/orders' && badgeFlash.orders) ||
+                              (href === '/admin/users' && badgeFlash.users) ||
+                              (href === '/admin/leads' && badgeFlash.leads)
+                                ? 'animate-pulse'
+                                : ''
+                            }
+                          >
+                          {href === '/admin/orders'
+                            ? (liveCounts.orders ?? 0)
+                            : href === '/admin/users'
+                              ? (liveCounts.users ?? 0)
+                              : (liveCounts.leads ?? 0)}
+                          </span>
+                        </span>
+                      )}
+                    </span>
+                  )}
                   {compactSidebar && (
                     <span className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2 px-2.5 py-1 rounded-lg bg-gray-900 text-white text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition">
                       {label}

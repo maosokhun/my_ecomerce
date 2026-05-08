@@ -4,6 +4,8 @@ import { AuthRequest } from '../middleware/auth';
 import { AppError } from '../middleware/errorHandler';
 import { paginate, paginateResponse } from '../utils/helpers';
 
+const adminSeenState = new Map<string, { ordersAt?: Date; usersAt?: Date; leadsAt?: Date }>();
+
 export const getDashboardStats = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const now = new Date();
@@ -243,6 +245,40 @@ export const getCoupons = async (req: AuthRequest, res: Response, next: NextFunc
   }
 };
 
+export const updateCoupon = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const id = String(req.params.id);
+    const { code, description, discountType, discount, minOrder, maxDiscount, usageLimit, expiresAt, isActive } = req.body;
+    const coupon = await prisma.coupon.update({
+      where: { id },
+      data: {
+        code: code ? String(code).toUpperCase() : undefined,
+        description: typeof description === 'string' ? description : undefined,
+        discountType: discountType || undefined,
+        discount: typeof discount !== 'undefined' ? Number(discount) : undefined,
+        minOrder: typeof minOrder !== 'undefined' ? (minOrder === null || minOrder === '' ? null : Number(minOrder)) : undefined,
+        maxDiscount: typeof maxDiscount !== 'undefined' ? (maxDiscount === null || maxDiscount === '' ? null : Number(maxDiscount)) : undefined,
+        usageLimit: typeof usageLimit !== 'undefined' ? (usageLimit === null || usageLimit === '' ? null : Number(usageLimit)) : undefined,
+        expiresAt: typeof expiresAt !== 'undefined' ? (expiresAt ? new Date(expiresAt) : null) : undefined,
+        isActive: typeof isActive === 'boolean' ? isActive : undefined,
+      },
+    });
+    res.json({ success: true, message: 'Coupon updated', data: coupon });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteCoupon = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const id = String(req.params.id);
+    await prisma.coupon.delete({ where: { id } });
+    res.json({ success: true, message: 'Coupon deleted' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const getAdvertisements = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
     const ads = await prisma.advertisement.findMany({ orderBy: { createdAt: 'desc' } });
@@ -262,6 +298,60 @@ export const getSellerProfiles = async (req: AuthRequest, res: Response, next: N
       },
     });
     res.json({ success: true, data: sellers });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getUnreadCounts = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const adminId = req.user!.id;
+    const seen = adminSeenState.get(adminId) || {};
+    const adminMeta = await prisma.user.findUnique({
+      where: { id: adminId },
+      select: { lastSeenLeadsAt: true },
+    });
+    const [orders, users, leads] = await Promise.all([
+      prisma.order.count({
+        where: seen.ordersAt ? { createdAt: { gt: seen.ordersAt } } : undefined,
+      }),
+      prisma.user.count({
+        where: seen.usersAt ? { createdAt: { gt: seen.usersAt } } : undefined,
+      }),
+      prisma.lead.count({
+        where: adminMeta?.lastSeenLeadsAt
+          ? { createdAt: { gt: adminMeta.lastSeenLeadsAt } }
+          : undefined,
+      }),
+    ]);
+
+    res.json({ success: true, data: { orders, users, leads } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const markSeen = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const adminId = req.user!.id;
+    const type = String(req.body?.type || '');
+    const now = new Date();
+    const seen = adminSeenState.get(adminId) || {};
+    if (type === 'orders') seen.ordersAt = now;
+    else if (type === 'users') seen.usersAt = now;
+    else if (type === 'leads') {
+      await prisma.user.update({
+        where: { id: adminId },
+        data: { lastSeenLeadsAt: now },
+      });
+      seen.leadsAt = now;
+    }
+    else {
+      res.status(400).json({ success: false, message: 'Invalid type' });
+      return;
+    }
+    adminSeenState.set(adminId, seen);
+    res.json({ success: true, message: 'Marked as seen' });
   } catch (error) {
     next(error);
   }

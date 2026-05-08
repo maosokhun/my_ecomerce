@@ -6,6 +6,7 @@ import { useThemeStore } from '@/store/themeStore';
 import { useAuthStore } from '@/store/authStore';
 import { useCartStore } from '@/store/cartStore';
 import { CartDrawer } from './cart/CartDrawer';
+import SupportChatWidget from './chat/SupportChatWidget';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const { isDark } = useThemeStore();
@@ -61,6 +62,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <>
       {children}
       <CartDrawer />
+      <SupportChatWidget />
       <Toaster
         position="top-right"
         toastOptions={{

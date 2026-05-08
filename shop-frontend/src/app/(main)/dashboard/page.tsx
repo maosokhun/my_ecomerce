@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
-import { authApi } from '@/lib/api';
+import { authApi, uploadApi } from '@/lib/api';
 import { User, Package, Heart, MapPin, Lock, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const [profileForm, setProfileForm] = useState({ name: user?.name || '', phone: user?.phone || '', avatar: user?.avatar || '' });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => {
     if (!isAuthChecked) return;
@@ -85,6 +86,36 @@ export default function DashboardPage() {
       toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message || t(language, 'updateFailed'));
     } finally { 
       setSaving(false); 
+    }
+  };
+
+  const resetProfileForm = () => {
+    setProfileForm({
+      name: user?.name || '',
+      phone: user?.phone || '',
+      avatar: user?.avatar || '',
+    });
+  };
+
+  const resetPasswordForm = () => {
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  };
+
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const { data } = await uploadApi.uploadProductImage(file, 'avatars');
+      const nextUrl = data?.data?.url || '';
+      if (!nextUrl) throw new Error('No URL');
+      setProfileForm((prev) => ({ ...prev, avatar: nextUrl }));
+      toast.success(language === 'km' ? 'បានផ្ទុករូបភាព' : language === 'zh' ? '图片上传成功' : 'Image uploaded');
+    } catch {
+      toast.error(language === 'km' ? 'ផ្ទុករូបបរាជ័យ' : language === 'zh' ? '图片上传失败' : 'Upload failed');
+    } finally {
+      setUploadingAvatar(false);
+      e.currentTarget.value = '';
     }
   };
 
@@ -200,19 +231,45 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Profile Image URL</label>
-                    <input
-                      type="url"
-                      value={profileForm.avatar}
-                      onChange={(e) => setProfileForm((p) => ({ ...p, avatar: e.target.value }))}
-                      placeholder="https://example.com/avatar.jpg"
-                      className="input"
-                    />
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      {language === 'km' ? 'រូបភាពប្រូហ្វាល់' : language === 'zh' ? '头像图片' : 'Profile Image'}
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-surface-900 text-sm font-medium text-gray-700 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-surface-800">
+                        {uploadingAvatar
+                          ? (language === 'km' ? 'កំពុងផ្ទុក...' : language === 'zh' ? '上传中...' : 'Uploading...')
+                          : (language === 'km' ? 'ជ្រើសរូបពីឧបករណ៍' : language === 'zh' ? '从设备选择图片' : 'Choose image from device')}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarFileChange}
+                          className="hidden"
+                          disabled={uploadingAvatar}
+                        />
+                      </label>
+                      <input
+                        type="url"
+                        value={profileForm.avatar}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, avatar: e.target.value }))}
+                        placeholder="https://example.com/avatar.jpg"
+                        className="input flex-1"
+                      />
+                    </div>
                   </div>
                 </div>
-                <button type="submit" disabled={saving} className="btn-primary mt-8 px-8 py-2.5 shadow-premium">
-                  {saving ? t(language, 'saving') : t(language, 'saveChanges')}
-                </button>
+                <div className="mt-8 flex flex-wrap items-center gap-3">
+                  <button type="submit" disabled={saving} className="btn-primary px-8 py-2.5 shadow-premium">
+                    {saving ? t(language, 'saving') : t(language, 'saveChanges')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={resetProfileForm}
+                    className="btn-secondary px-6 py-2.5"
+                  >
+                    {language === 'km' ? 'បោះបង់' : language === 'zh' ? '取消' : 'Cancel'}
+                  </button>
+                </div>
               </form>
             ) : (
               <form onSubmit={handleChangePassword}>
@@ -235,9 +292,19 @@ export default function DashboardPage() {
                       />
                     </div>
                   ))}
-                  <button type="submit" disabled={saving} className="btn-primary mt-4 px-8 py-2.5 shadow-premium">
-                    {saving ? t(language, 'updating') : t(language, 'updatePassword')}
-                  </button>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button type="submit" disabled={saving} className="btn-primary px-8 py-2.5 shadow-premium">
+                      {saving ? t(language, 'updating') : t(language, 'updatePassword')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={resetPasswordForm}
+                      className="btn-secondary px-6 py-2.5"
+                    >
+                      {language === 'km' ? 'បោះបង់' : language === 'zh' ? '取消' : 'Cancel'}
+                    </button>
+                  </div>
                 </div>
               </form>
             )}

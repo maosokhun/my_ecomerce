@@ -11,6 +11,7 @@ import { t } from '@/lib/i18n';
 import type { AppLanguage } from '@/lib/i18n';
 import toast from 'react-hot-toast';
 import axios from 'axios';
+import { authApi } from '@/lib/api';
 
 function loginErrorMessage(error: unknown, lang: AppLanguage): string {
   if (axios.isAxiosError(error)) {
@@ -26,9 +27,16 @@ function loginErrorMessage(error: unknown, lang: AppLanguage): string {
 }
 
 function LoginForm() {
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ identifier: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotMode, setForgotMode] = useState<'email' | 'info'>('email');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotName, setForgotName] = useState('');
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
   const { login, loginWithFacebook, isLoading } = useAuthStore();
   const { language } = useLanguageStore();
   const router = useRouter();
@@ -39,7 +47,7 @@ function LoginForm() {
     e.preventDefault();
     setSubmitError(null);
     try {
-      await login(form.email, form.password);
+      await login(form.identifier, form.password);
       toast.success(t(language, 'welcomeBack'));
       router.push(redirect);
     } catch (error: unknown) {
@@ -61,6 +69,46 @@ function LoginForm() {
         ? (error.response?.data as { message?: string } | undefined)?.message
         : undefined;
       toast.error(msg || t(language, 'facebookLoginFailed'));
+    }
+  };
+
+  const handleRequestResetCode = async () => {
+    try {
+      await authApi.requestPasswordResetByEmail({ email: forgotEmail.trim() });
+      toast.success(language === 'km' ? 'បានផ្ញើលេខកូដទៅអ៊ីមែល' : language === 'zh' ? '验证码已发送到邮箱' : 'Code sent to email');
+    } catch (error: unknown) {
+      const msg = axios.isAxiosError(error) ? (error.response?.data as { message?: string })?.message : undefined;
+      toast.error(msg || (language === 'km' ? 'ផ្ញើលេខកូដបរាជ័យ' : language === 'zh' ? '发送验证码失败' : 'Failed to send code'));
+    }
+  };
+
+  const handleResetByEmailCode = async () => {
+    try {
+      await authApi.resetPasswordByEmailCode({
+        email: forgotEmail.trim(),
+        code: forgotCode.trim(),
+        newPassword: forgotNewPassword,
+      });
+      toast.success(language === 'km' ? 'ប្ដូរពាក្យសម្ងាត់ជោគជ័យ' : language === 'zh' ? '密码重置成功' : 'Password reset successful');
+      setForgotOpen(false);
+    } catch (error: unknown) {
+      const msg = axios.isAxiosError(error) ? (error.response?.data as { message?: string })?.message : undefined;
+      toast.error(msg || (language === 'km' ? 'លេខកូដមិនត្រឹមត្រូវ' : language === 'zh' ? '验证码不正确' : 'Invalid verification code'));
+    }
+  };
+
+  const handleResetByInfo = async () => {
+    try {
+      await authApi.resetPasswordByInfo({
+        name: forgotName.trim(),
+        phone: forgotPhone.trim(),
+        newPassword: forgotNewPassword,
+      });
+      toast.success(language === 'km' ? 'ប្ដូរពាក្យសម្ងាត់ជោគជ័យ' : language === 'zh' ? '密码重置成功' : 'Password reset successful');
+      setForgotOpen(false);
+    } catch (error: unknown) {
+      const msg = axios.isAxiosError(error) ? (error.response?.data as { message?: string })?.message : undefined;
+      toast.error(msg || (language === 'km' ? 'ព័ត៌មានមិនត្រឹមត្រូវ' : language === 'zh' ? '信息不正确' : 'Provided information is incorrect'));
     }
   };
 
@@ -86,15 +134,17 @@ function LoginForm() {
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">{t(language, 'emailAddress')}</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+              {language === 'km' ? 'អ៊ីមែល ឬ លេខទូរស័ព្ទ' : language === 'zh' ? '邮箱或手机号' : 'Email or phone'}
+            </label>
             <input
-              type="email"
-              value={form.email}
+              type="text"
+              value={form.identifier}
               onChange={(e) => {
                 setSubmitError(null);
-                setForm((p) => ({ ...p, email: e.target.value }));
+                setForm((p) => ({ ...p, identifier: e.target.value }));
               }}
-              placeholder="you@example.com"
+              placeholder={language === 'km' ? 'you@example.com ឬ 012345678' : language === 'zh' ? 'you@example.com 或 012345678' : 'you@example.com or 012345678'}
               required
               autoFocus
               className="input"
@@ -146,7 +196,72 @@ function LoginForm() {
           {t(language, 'dontHaveAccount')}{' '}
           <Link href="/register" className="text-primary-600 font-semibold hover:underline">{t(language, 'signUp')}</Link>
         </p>
+        <button
+          type="button"
+          onClick={() => setForgotOpen(true)}
+          className="w-full mt-3 text-sm text-primary-600 hover:underline"
+        >
+          {language === 'km' ? 'ភ្លេចពាក្យសម្ងាត់?' : language === 'zh' ? '忘记密码？' : 'Forgot password?'}
+        </button>
       </div>
+
+      {forgotOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="card p-5 w-full max-w-md space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-white">
+                {language === 'km' ? 'កំណត់ពាក្យសម្ងាត់ឡើងវិញ' : language === 'zh' ? '重置密码' : 'Reset password'}
+              </h3>
+              <button type="button" onClick={() => setForgotOpen(false)} className="text-gray-500">✕</button>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setForgotMode('email')} className={`px-3 py-1.5 rounded-lg text-sm ${forgotMode === 'email' ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-surface-800'}`}>
+                {language === 'km' ? 'ផ្ទៀងផ្ទាត់តាមអ៊ីមែល' : language === 'zh' ? '邮箱验证' : 'Verify by email'}
+              </button>
+              <button type="button" onClick={() => setForgotMode('info')} className={`px-3 py-1.5 rounded-lg text-sm ${forgotMode === 'info' ? 'bg-primary-600 text-white' : 'bg-gray-100 dark:bg-surface-800'}`}>
+                {language === 'km' ? 'ផ្ទៀងផ្ទាត់តាមព័ត៌មាន' : language === 'zh' ? '信息验证' : 'Verify by information'}
+              </button>
+            </div>
+
+            {forgotMode === 'email' ? (
+              <div className="space-y-2">
+                <input className="input" placeholder="Email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} />
+                <div className="flex gap-2">
+                  <input className="input flex-1" placeholder={language === 'km' ? 'លេខកូដ' : language === 'zh' ? '验证码' : 'Code'} value={forgotCode} onChange={(e) => setForgotCode(e.target.value)} />
+                  <button type="button" onClick={handleRequestResetCode} className="btn-secondary text-sm">
+                    {language === 'km' ? 'ផ្ញើកូដ' : language === 'zh' ? '发送验证码' : 'Send code'}
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder={language === 'km' ? 'ពាក្យសម្ងាត់ថ្មី' : language === 'zh' ? '新密码' : 'New password'}
+                  value={forgotNewPassword}
+                  onChange={(e) => setForgotNewPassword(e.target.value)}
+                />
+                <button type="button" onClick={handleResetByEmailCode} className="btn-primary w-full">
+                  {language === 'km' ? 'ប្ដូរពាក្យសម្ងាត់' : language === 'zh' ? '重置密码' : 'Reset password'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <input className="input" placeholder={language === 'km' ? 'ឈ្មោះ' : language === 'zh' ? '姓名' : 'Name'} value={forgotName} onChange={(e) => setForgotName(e.target.value)} />
+                <input className="input" placeholder={language === 'km' ? 'លេខទូរស័ព្ទ' : language === 'zh' ? '手机号' : 'Phone'} value={forgotPhone} onChange={(e) => setForgotPhone(e.target.value)} />
+                <input
+                  type="password"
+                  className="input"
+                  placeholder={language === 'km' ? 'ពាក្យសម្ងាត់ថ្មី' : language === 'zh' ? '新密码' : 'New password'}
+                  value={forgotNewPassword}
+                  onChange={(e) => setForgotNewPassword(e.target.value)}
+                />
+                <button type="button" onClick={handleResetByInfo} className="btn-primary w-full">
+                  {language === 'km' ? 'ប្ដូរពាក្យសម្ងាត់' : language === 'zh' ? '重置密码' : 'Reset password'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

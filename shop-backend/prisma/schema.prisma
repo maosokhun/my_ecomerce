@@ -50,7 +50,7 @@ enum SellerStatus {
 
 model User {
   id            String    @id @default(cuid())
-  email         String    @unique
+  email         String?   @unique
   password      String
   name          String
   phone         String?
@@ -67,8 +67,48 @@ model User {
   cart          Cart?
   wishlist      Wishlist[]
   sellerProfile SellerProfile?
+  lastSeenOrdersAt DateTime?
+  lastSeenUsersAt  DateTime?
+  lastSeenLeadsAt DateTime?
 
   @@map("users")
+}
+
+model Lead {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("leads")
+}
+
+model NewsletterLead {
+  id        String   @id @default(cuid())
+  email     String
+  phone     String?
+  source    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime?
+
+  @@map("newsletter_leads")
+}
+
+model SupportInquiry {
+  id         String   @id @default(cuid())
+  name       String?
+  phone      String?
+  question   String   @db.Text
+  priority   String?
+  language   String?
+  source     String?
+  status     String?
+  transcript String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime?
+
+  @@map("support_inquiries")
 }
 
 model Address {
@@ -92,6 +132,7 @@ model Address {
   zipCode    String?
   note       String?  @db.Text
   isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -291,6 +332,9 @@ model Order {
   shippingCarrier String?
   subtotal        Float
   discount        Float         @default(0)
+  couponCode      String?
+  couponDiscountType String?
+  couponDiscountValue Float?
   shippingCost    Float         @default(0)
   tax             Float         @default(0)
   total           Float
@@ -420,9 +464,9 @@ model SellerProfile {
 model SiteSettings {
   id           String   @id @default("default")
   siteName     String   @default("SH-Shop")
-  shippingFee  Float    @default(2.0)
-  shippingFeeVet Float  @default(2.0)
-  shippingFeeJnt Float  @default(2.0)
+  shippingFee  Float    @default(1.0)
+  shippingFeeVet Float  @default(1.0)
+  shippingFeeJnt Float  @default(1.0)
   heroImages   Json     @default("[]")
   footerInfo   Json     @default("{}")
   createdAt    DateTime @default(now())

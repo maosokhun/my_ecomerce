@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -12,12 +12,15 @@ import { formatPrice } from '@/lib/utils';
 import { useLanguageStore } from '@/store/languageStore';
 import { t } from '@/lib/i18n';
 import toast from 'react-hot-toast';
+import { orderApi } from '@/lib/api';
 
 export default function CartPage() {
   const { cart, fetchCart, updateItem, removeItem, isLoading } = useCartStore();
   const { isAuthenticated } = useAuthStore();
   const { language } = useLanguageStore();
   const router = useRouter();
+  const [couponInput, setCouponInput] = useState('');
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
 
   useEffect(() => {
     fetchCart();
@@ -26,6 +29,23 @@ export default function CartPage() {
   const subtotal = cart?.cartTotal || 0;
   const shipping = subtotal >= 50 ? 0 : 9.99;
   const total = subtotal + shipping;
+
+  const applyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!code) return;
+    setIsApplyingCoupon(true);
+    try {
+      await orderApi.previewCoupon({ couponCode: code });
+      localStorage.setItem('couponCode', code.toUpperCase());
+      toast.success(language === 'km' ? 'បានរក្សាទុក Coupon' : language === 'zh' ? '优惠券已保存' : 'Coupon saved');
+    } catch (error: unknown) {
+      const msg = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg || t(language, 'invalidCouponCode'));
+      localStorage.removeItem('couponCode');
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
 
   return (
     <div className="page-container py-8">
@@ -162,9 +182,13 @@ export default function CartPage() {
                 <input
                   type="text"
                   placeholder="WELCOME20"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
                   className="input text-sm flex-1"
                 />
-                <button className="btn-secondary text-sm px-4">{t(language, 'apply')}</button>
+                <button onClick={applyCoupon} disabled={isApplyingCoupon} className="btn-secondary text-sm px-4">
+                  {isApplyingCoupon ? '...' : t(language, 'apply')}
+                </button>
               </div>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createOrder,
+  previewCoupon,
   getUserOrders,
   getOrder,
   getOrderInvoice,
@@ -17,6 +18,7 @@ const router = Router();
 router.use(authenticate);
 
 router.post('/', createOrder);
+router.post('/coupon-preview', previewCoupon);
 router.get('/', getUserOrders);
 
 // Static routes must come BEFORE /:id wildcard routes
