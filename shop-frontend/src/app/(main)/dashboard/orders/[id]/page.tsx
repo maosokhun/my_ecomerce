@@ -386,15 +386,15 @@ export default function OrderDetailsPage() {
       </div>
 
       <div className="card p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex flex-col gap-4">
           <div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">{order.orderNumber}</h1>
             <p className="text-sm text-gray-500 mt-1">
               {t(language, 'placedOn').replace('{date}', formatDate(order.createdAt, language))}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-2">
               <span className={`badge ${getOrderStatusColor(order.status)}`}>
                 {t(language, `orderStatus_${order.status}`)}
               </span>
@@ -402,54 +402,56 @@ export default function OrderDetailsPage() {
                 {t(language, order.paymentStatus === 'PAID' ? 'paymentStatus_PAID' : 'paymentStatus_PENDING')}
               </span>
             </div>
-            {order.paymentStatus === 'PENDING' && (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center rounded-xl border border-gray-200 dark:border-gray-700 p-1 bg-white dark:bg-surface-900">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPaymentMethod('card')}
-                    className={`px-3 py-1.5 text-xs rounded-lg ${
-                      selectedPaymentMethod === 'card'
-                        ? 'bg-primary-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300'
-                    }`}
-                  >
-                    Visa/Master
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPaymentMethod('bakong')}
-                    className={`px-3 py-1.5 text-xs rounded-lg ${
-                      selectedPaymentMethod === 'bakong'
-                        ? 'bg-primary-600 text-white'
-                        : 'text-gray-600 dark:text-gray-300'
-                    }`}
-                  >
-                    Bakong
-                  </button>
-                </div>
-                <button
-                  onClick={handlePayNow}
-                  disabled={isPaying}
-                  className="btn-primary py-2 px-4 text-sm flex items-center gap-2 shadow-md shadow-primary-500/20"
-                >
-                  {selectedPaymentMethod === 'bakong' ? <QrCode className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
-                  {isPaying ? '...' : t(language, 'payNow')}
-                </button>
-                {(order.status === 'PENDING' || order.status === 'CONFIRMED') && (
-                  <button
-                    type="button"
-                    onClick={handleCancelOrder}
-                    className="btn-secondary py-2 px-4 text-sm flex items-center gap-2 text-red-600 dark:text-red-400"
-                  >
-                    <XCircle className="w-4 h-4" />
-                    {language === 'km' ? 'បោះបង់កម្មង់' : language === 'zh' ? '取消订单' : 'Cancel order'}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
         </div>
+        {order.paymentStatus === 'PENDING' && (
+          <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+            <div className="flex items-center rounded-xl border border-gray-200 dark:border-gray-700 p-1 bg-white dark:bg-surface-900 w-fit">
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethod('card')}
+                className={`px-3 py-1.5 text-xs rounded-lg ${
+                  selectedPaymentMethod === 'card'
+                    ? 'bg-primary-600 text-white'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                Visa/Master
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethod('bakong')}
+                className={`px-3 py-1.5 text-xs rounded-lg ${
+                  selectedPaymentMethod === 'bakong'
+                    ? 'bg-primary-600 text-white'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                Bakong
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handlePayNow}
+                disabled={isPaying}
+                className="btn-primary py-2 px-4 text-sm flex items-center gap-2 shadow-md shadow-primary-500/20"
+              >
+                {selectedPaymentMethod === 'bakong' ? <QrCode className="w-4 h-4" /> : <CreditCard className="w-4 h-4" />}
+                {isPaying ? '...' : t(language, 'payNow')}
+              </button>
+              {(order.status === 'PENDING' || order.status === 'CONFIRMED') && (
+                <button
+                  type="button"
+                  onClick={handleCancelOrder}
+                  className="btn-secondary py-2 px-4 text-sm flex items-center gap-2 text-red-600 dark:text-red-400"
+                >
+                  <XCircle className="w-4 h-4" />
+                  {language === 'km' ? 'បោះបង់កម្មង់' : language === 'zh' ? '取消订单' : 'Cancel order'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Order Status Stepper */}
         <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-800">

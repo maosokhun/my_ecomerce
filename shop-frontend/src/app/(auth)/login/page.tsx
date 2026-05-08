@@ -26,10 +26,37 @@ function loginErrorMessage(error: unknown, lang: AppLanguage): string {
   return t(lang, 'loginFailed');
 }
 
+function parseLoginFieldError(error: unknown, lang: AppLanguage): { identifier?: string; password?: string } {
+  if (!axios.isAxiosError(error)) return {};
+  const rawMessage = (error.response?.data as { message?: string } | undefined)?.message?.toLowerCase() || '';
+  if (rawMessage.includes('phone/email')) {
+    return {
+      identifier:
+        lang === 'km'
+          ? 'អ៊ីមែល ឬ លេខទូរស័ព្ទមិនត្រឹមត្រូវ'
+          : lang === 'zh'
+            ? '邮箱或手机号不正确'
+            : 'Email or phone is incorrect',
+    };
+  }
+  if (rawMessage.includes('password')) {
+    return {
+      password:
+        lang === 'km'
+          ? 'ពាក្យសម្ងាត់មិនត្រឹមត្រូវ'
+          : lang === 'zh'
+            ? '密码不正确'
+            : 'Password is incorrect',
+    };
+  }
+  return {};
+}
+
 function LoginForm() {
   const [form, setForm] = useState({ identifier: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ identifier?: string; password?: string }>({});
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotMode, setForgotMode] = useState<'email' | 'info'>('email');
   const [forgotEmail, setForgotEmail] = useState('');
@@ -46,12 +73,42 @@ function LoginForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
+    setFieldErrors({});
+    const nextErrors: { identifier?: string; password?: string } = {};
+    if (!form.identifier.trim()) {
+      nextErrors.identifier =
+        language === 'km'
+          ? 'សូមបញ្ចូលអ៊ីមែល ឬ លេខទូរស័ព្ទ'
+          : language === 'zh'
+            ? '请输入邮箱或手机号'
+            : 'Please enter email or phone';
+    }
+    if (!form.password.trim()) {
+      nextErrors.password =
+        language === 'km'
+          ? 'សូមបញ្ចូលពាក្យសម្ងាត់'
+          : language === 'zh'
+            ? '请输入密码'
+            : 'Please enter password';
+    }
+    if (nextErrors.identifier || nextErrors.password) {
+      setFieldErrors(nextErrors);
+      setSubmitError(
+        language === 'km'
+          ? 'សូមពិនិត្យ field ខាងក្រោម'
+          : language === 'zh'
+            ? '请检查下面的字段'
+            : 'Please check the fields below'
+      );
+      return;
+    }
     try {
       await login(form.identifier, form.password);
       toast.success(t(language, 'welcomeBack'));
       router.push(redirect);
     } catch (error: unknown) {
       const msg = loginErrorMessage(error, language);
+      setFieldErrors(parseLoginFieldError(error, language));
       setSubmitError(msg);
       toast.error(msg);
     }
@@ -142,13 +199,16 @@ function LoginForm() {
               value={form.identifier}
               onChange={(e) => {
                 setSubmitError(null);
+                setFieldErrors((prev) => ({ ...prev, identifier: undefined }));
                 setForm((p) => ({ ...p, identifier: e.target.value }));
               }}
               placeholder={language === 'km' ? 'you@example.com ឬ 012345678' : language === 'zh' ? 'you@example.com 或 012345678' : 'you@example.com or 012345678'}
-              required
               autoFocus
-              className="input"
+              className={`input ${fieldErrors.identifier ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : ''}`}
             />
+            {fieldErrors.identifier && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.identifier}</p>
+            )}
           </div>
 
           <div>
@@ -159,11 +219,11 @@ function LoginForm() {
                 value={form.password}
                 onChange={(e) => {
                   setSubmitError(null);
+                  setFieldErrors((prev) => ({ ...prev, password: undefined }));
                   setForm((p) => ({ ...p, password: e.target.value }));
                 }}
                 placeholder="••••••••"
-                required
-                className="input pr-10"
+                className={`input pr-10 ${fieldErrors.password ? 'border-red-400 focus:ring-red-200 focus:border-red-500' : ''}`}
               />
               <button
                 type="button"
@@ -173,6 +233,9 @@ function LoginForm() {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            {fieldErrors.password && (
+              <p className="mt-1 text-xs text-red-600 dark:text-red-400">{fieldErrors.password}</p>
+            )}
           </div>
 
           <button type="submit" disabled={isLoading} className="btn-primary w-full py-3">

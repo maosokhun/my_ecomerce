@@ -5,7 +5,7 @@ import axios from 'axios';
 import prisma from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
-import { sendEmail } from '../lib/notifier';
+import { sendEmail, sendTelegramMessage } from '../lib/notifier';
 
 /** Letters from any script + spaces and common punctuation (Khmer/Latin names). */
 const DISPLAY_NAME_PATTERN = /^[\p{L}\p{M}\s'.-]+$/u;
@@ -17,6 +17,63 @@ const signToken = (payload: { id: string; email: string; role: string; name: str
   return jwt.sign(payload, process.env.JWT_SECRET!, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   } as jwt.SignOptions);
+};
+
+const parseCsv = (value?: string): string[] =>
+  String(value || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+const resolveTelegramTargets = (): string[] =>
+  parseCsv(
+    process.env.TELEGRAM_USER_CHAT_IDS ||
+      process.env.TELEGRAM_USER_CHAT_ID ||
+      process.env.TELEGRAM_CHAT_IDS ||
+      process.env.TELEGRAM_CHAT_ID
+  );
+
+const resolveTelegramBotToken = (): string | undefined =>
+  process.env.TELEGRAM_USER_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+const formatDateTime24 = (value: Date): string =>
+  value.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+const getRequestIp = (req: Request): string => {
+  const xfwd = req.headers['x-forwarded-for'];
+  if (typeof xfwd === 'string' && xfwd.trim()) return xfwd.split(',')[0].trim();
+  if (Array.isArray(xfwd) && xfwd[0]) return String(xfwd[0]).trim();
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+};
+
+const notifyTelegramAuthEvent = async (
+  req: Request,
+  user: { id: string; name: string; email?: string | null; phone?: string | null },
+  event: 'REGISTER' | 'LOGIN'
+): Promise<void> => {
+  const targets = resolveTelegramTargets();
+  if (targets.length === 0) return;
+  const title = event === 'REGISTER' ? '🆕 អ្នកប្រើប្រាស់បានចុះឈ្មោះ' : '🔐 អ្នកប្រើប្រាស់បានចូលគណនី';
+  const text = [
+    title,
+    `ឈ្មោះ: ${user.name || 'មិនមាន'}`,
+    `អ៊ីមែល: ${user.email || 'មិនមាន'}`,
+    `ទូរស័ព្ទ: ${user.phone || 'មិនមាន'}`,
+    `IP Address: ${getRequestIp(req)}`,
+    `User Agent: ${req.headers['user-agent'] || 'unknown'}`,
+    `User ID: ${user.id}`,
+    `ថ្ងៃ/ម៉ោង: ${formatDateTime24(new Date())}`,
+  ].join('\n');
+  const botToken = resolveTelegramBotToken();
+  await Promise.allSettled(targets.map((chatId) => sendTelegramMessage({ chatId, text, botToken })));
 };
 
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -69,6 +126,9 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     await prisma.cart.create({ data: { userId: user.id } });
 
     const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
+    notifyTelegramAuthEvent(req, user, 'REGISTER').catch((error) => {
+      console.error('[Auth Notify] Register Telegram notification failed:', error);
+    });
 
     res.status(201).json({
       success: true,
@@ -95,16 +155,23 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       where: isEmail ? { email: loginId.toLowerCase() } : { phone: digits || loginId },
     });
 
-    if (!user || !user.isActive) {
-      throw new AppError('Invalid credentials', 401);
+    if (!user) {
+      throw new AppError('Phone/email is incorrect', 401);
+    }
+
+    if (!user.isActive) {
+      throw new AppError('Your account is inactive', 403);
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      throw new AppError('Invalid credentials', 401);
+      throw new AppError('Password is incorrect', 401);
     }
 
     const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
+    notifyTelegramAuthEvent(req, user, 'LOGIN').catch((error) => {
+      console.error('[Auth Notify] Login Telegram notification failed:', error);
+    });
 
     const { password: _, ...userWithoutPassword } = user;
     void _;
