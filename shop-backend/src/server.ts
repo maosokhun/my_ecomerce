@@ -9,6 +9,9 @@ const start = async () => {
     if (!process.env.DATABASE_URL) {
       throw new Error('DATABASE_URL is not set. Configure database connection before starting backend.');
     }
+    if (!process.env.JWT_SECRET?.trim()) {
+      throw new Error('JWT_SECRET is not set. Add it in Render Environment (any long random string).');
+    }
 
     await prisma.$connect();
     console.log('✅ Database connected');

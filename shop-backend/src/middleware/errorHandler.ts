@@ -37,6 +37,8 @@ export const errorHandler = (
 
   if (process.env.NODE_ENV === 'development') {
     console.error('[ERROR]', err);
+  } else if (statusCode === 500) {
+    console.error('[ERROR]', err instanceof Error ? err.message : err);
   }
 
   res.status(statusCode).json({

@@ -128,10 +128,11 @@ npm start
 
 1. Import repository in Vercel.
 2. Set **Root Directory** to `shop-frontend`.
-3. Set env vars:
+3. In **Build & Output Settings**: **Framework Preset** = **Next.js**; leave **Output Directory** empty (do not set `public` — that causes “No Output Directory named public” on Vercel).
+4. Set env vars:
    - `NEXT_PUBLIC_API_URL=https://<your-backend-domain>/api`
    - `INTERNAL_API_URL=https://<your-backend-domain>/api`
-4. Deploy.
+5. Deploy.
 
 ### Backend on Render (without `render.yaml`)
 
