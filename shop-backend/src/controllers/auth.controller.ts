@@ -7,8 +7,8 @@ import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { sendEmail, sendTelegramMessage } from '../lib/notifier';
 
-/** Letters from any script + spaces and common punctuation (Khmer/Latin names). */
-const DISPLAY_NAME_PATTERN = /^[\p{L}\p{M}\s'.-]+$/u;
+/** Letters from any script + spaces, hyphen, apostrophe, period (Khmer/Latin names). Hyphen first so it is not parsed as a range. */
+const DISPLAY_NAME_PATTERN = /^[-\p{L}\p{M}\s'.]+$/u;
 
 const normalizePhoneDigits = (raw: string): string => raw.replace(/\D/g, '');
 const forgotPasswordCodes = new Map<string, { code: string; expiresAt: number }>();
@@ -54,6 +54,74 @@ const getRequestIp = (req: Request): string => {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 };
 
+/** Short display ID for Telegram: U + 9 digits, stable per DB id (not the raw cuid). */
+const formatPublicUserId = (id: string): string => {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const n = (h % 900_000_000) + 100_000_000;
+  return `U${n}`;
+};
+
+/** Rough city/country from IP (HTTPS, no API key). Fails silently if offline/rate-limited. */
+const lookupIpGeo = async (ip: string): Promise<string | null> => {
+  if (!ip || ip === 'unknown') return null;
+  if (ip.startsWith('127.') || ip.startsWith('192.168.') || ip.startsWith('10.')) return null;
+  if (process.env.DISABLE_IP_GEO_LOOKUP === '1' || process.env.DISABLE_IP_GEO_LOOKUP === 'true') return null;
+  try {
+    const { data } = await axios.get<{
+      success?: boolean;
+      city?: string;
+      region?: string;
+      country?: string;
+      message?: string;
+    }>(`https://ipwho.is/${encodeURIComponent(ip)}`, { timeout: 2800 });
+    if (data?.success === false) return null;
+    const parts = [data.city, data.region, data.country].filter((p): p is string => Boolean(p && String(p).trim()));
+    return parts.length ? parts.join(', ') : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Guess phone / tablet / desktop + OS + browser from User-Agent (heuristic only). */
+const summarizeDeviceFromUserAgent = (uaRaw: string): string => {
+  const ua = uaRaw.slice(0, 500);
+  if (!ua || ua === 'unknown') return 'មិនស្គាល់';
+
+  const hasAndroid = /Android/i.test(ua);
+  const androidMobile = hasAndroid && /Mobile/i.test(ua);
+  const isIpad = /iPad/i.test(ua);
+  const isIphone = /iPhone|iPod/i.test(ua);
+  const tablet =
+    isIpad || (hasAndroid && !androidMobile) || /Tablet|PlayBook|Silk\//i.test(ua);
+  const phone =
+    isIphone ||
+    androidMobile ||
+    /webOS|BlackBerry|IEMobile|Opera Mini|Mobile Safari.*\bMobile\b/i.test(ua);
+  const formFactor = tablet ? 'Tablet' : phone ? 'ទូរស័ព្ទ' : 'កុំព្យូទ័រ';
+
+  let os = 'unknown';
+  if (/Windows NT/i.test(ua)) os = 'Windows';
+  else if (/Mac OS X|Macintosh/i.test(ua)) os = 'macOS';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+  else if (/CrOS/i.test(ua)) os = 'ChromeOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  let browser = 'unknown';
+  if (/Edg\//i.test(ua)) browser = 'Edge';
+  else if (/OPR\/|Opera\//i.test(ua)) browser = 'Opera';
+  else if (/SamsungBrowser/i.test(ua)) browser = 'Samsung Internet';
+  else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+  else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+  else if (/Safari/i.test(ua) && /Version\//i.test(ua)) browser = 'Safari';
+
+  return `${formFactor} · ${os} · ${browser}`;
+};
+
 const notifyTelegramAuthEvent = async (
   req: Request,
   user: { id: string; name: string; email?: string | null; phone?: string | null },
@@ -62,14 +130,20 @@ const notifyTelegramAuthEvent = async (
   const targets = resolveTelegramTargets();
   if (targets.length === 0) return;
   const title = event === 'REGISTER' ? '🆕 អ្នកប្រើប្រាស់បានចុះឈ្មោះ' : '🔐 អ្នកប្រើប្រាស់បានចូលគណនី';
+  const ip = getRequestIp(req);
+  const geo = await lookupIpGeo(ip);
+  const ua = String(req.headers['user-agent'] || 'unknown').slice(0, 500);
   const text = [
     title,
     `ឈ្មោះ: ${user.name || 'មិនមាន'}`,
     `អ៊ីមែល: ${user.email || 'មិនមាន'}`,
     `ទូរស័ព្ទ: ${user.phone || 'មិនមាន'}`,
-    `IP Address: ${getRequestIp(req)}`,
-    `User Agent: ${req.headers['user-agent'] || 'unknown'}`,
-    `User ID: ${user.id}`,
+    `IP Address: ${ip}`,
+    `ទីតាំង (ប៉ាន់ប្រមាណតាម IP): ${geo || 'មិនអាចស្គាល់ / មិនបានសួរ'}`,
+    `ឧបករណ៍ (ប៉ាន់ប្រមាណតាម User-Agent): ${summarizeDeviceFromUserAgent(ua)}`,
+    `កម្មវិធីរុករក (User-Agent ពេញ): ${ua}`,
+    `  ↳ ជាព័ត៌មាន browser + OS ដែលកម្មវិធីផ្ញើមក (មិនមែន GPS)។ អាចក្លែងបន្លំបាន កុំយកជាភស្តុតាងតែមួយ។`,
+    `User ID: ${formatPublicUserId(user.id)}`,
     `ថ្ងៃ/ម៉ោង: ${formatDateTime24(new Date())}`,
   ].join('\n');
   const botToken = resolveTelegramBotToken();
@@ -85,7 +159,10 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     }
 
     if (!DISPLAY_NAME_PATTERN.test(String(name).trim())) {
-      throw new AppError('Name can contain letters only', 400);
+      throw new AppError(
+        'Name may only include letters (any script), spaces, hyphens (-), apostrophes, and periods',
+        400
+      );
     }
 
     const phoneDigits = normalizePhoneDigits(String(phone));
@@ -186,6 +263,87 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
   }
 };
 
+/** Sign in with Google (GIS id_token). Set GOOGLE_CLIENT_ID to your Web client ID (same value as NEXT_PUBLIC_GOOGLE_CLIENT_ID on Vercel). */
+export const googleLogin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { credential } = req.body as { credential?: string };
+    if (!credential) throw new AppError('Google credential is required', 400);
+    const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    if (!clientId) throw new AppError('Google sign-in is not configured on server', 503);
+
+    let payload: Record<string, string | undefined>;
+    try {
+      const { data } = await axios.get<Record<string, string | undefined>>(
+        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`,
+        { timeout: 10000 }
+      );
+      payload = data;
+    } catch {
+      throw new AppError('Invalid Google credential', 401);
+    }
+
+    if (payload.error) throw new AppError('Invalid Google credential', 401);
+    const aud = payload.aud;
+    const azp = payload.azp;
+    if (aud !== clientId && azp !== clientId) {
+      throw new AppError('Invalid Google credential audience', 401);
+    }
+
+    const verified = String(payload.email_verified || '').toLowerCase();
+    if (verified === 'false') throw new AppError('Google email is not verified', 401);
+
+    const emailRaw = payload.email?.toLowerCase().trim();
+    if (!emailRaw) throw new AppError('Google account has no email', 401);
+
+    const sub = payload.sub || '';
+    const name = (payload.name || '').trim() || emailRaw.split('@')[0] || 'Google User';
+    const picture = payload.picture || undefined;
+
+    let user = await prisma.user.findUnique({ where: { email: emailRaw } });
+    const isNew = !user;
+    if (!user) {
+      const randomPassword = await bcrypt.hash(`google_${sub}_${Date.now()}`, 12);
+      user = await prisma.user.create({
+        data: {
+          email: emailRaw,
+          name,
+          avatar: picture || null,
+          password: randomPassword,
+          emailVerified: true,
+        },
+      });
+      await prisma.cart.create({ data: { userId: user.id } });
+    } else {
+      const updates: { name?: string; avatar?: string | null } = {};
+      if (name && user.name !== name) updates.name = name;
+      if (picture && !user.avatar) updates.avatar = picture;
+      if (Object.keys(updates).length) {
+        user = await prisma.user.update({ where: { id: user.id }, data: updates });
+      }
+    }
+
+    const token = signToken({ id: user.id, email: user.email || '', role: user.role, name: user.name });
+    notifyTelegramAuthEvent(
+      req,
+      { id: user.id, name: user.name, email: user.email, phone: user.phone },
+      isNew ? 'REGISTER' : 'LOGIN'
+    ).catch((error) => {
+      console.error('[Auth Notify] Google Telegram notification failed:', error);
+    });
+
+    const { password: _, ...userWithoutPassword } = user;
+    void _;
+
+    res.json({
+      success: true,
+      message: isNew ? 'Google registration successful' : 'Google login successful',
+      data: { user: userWithoutPassword, token },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const facebookLogin = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { accessToken } = req.body as { accessToken?: string };
@@ -274,7 +432,10 @@ export const updateProfile = async (
       const trimmedName = String(name).trim();
       if (!trimmedName) throw new AppError('Name is required', 400);
       if (!DISPLAY_NAME_PATTERN.test(trimmedName)) {
-        throw new AppError('Name can contain letters only', 400);
+        throw new AppError(
+          'Name may only include letters (any script), spaces, hyphens (-), apostrophes, and periods',
+          400
+        );
       }
       updateData.name = trimmedName;
     }

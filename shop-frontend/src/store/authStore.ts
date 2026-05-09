@@ -12,6 +12,7 @@ interface AuthState {
 
   login: (identifier: string, password: string) => Promise<void>;
   loginWithFacebook: (accessToken: string) => Promise<void>;
+  loginWithGoogle: (credential: string) => Promise<void>;
   register: (name: string, email: string | undefined, phone: string, password: string) => Promise<void>;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
@@ -50,6 +51,25 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
         try {
           const { data } = await authApi.facebookLogin(accessToken);
+          const { user, token } = data.data;
+          localStorage.setItem('token', token);
+          set({ user, token, isAuthenticated: true, isLoading: false, isAuthChecked: true });
+          try {
+            const me = await authApi.getMe();
+            if (me.data?.data) set({ user: me.data.data });
+          } catch {
+            /* keep login payload */
+          }
+        } catch (error) {
+          set({ isLoading: false });
+          throw error;
+        }
+      },
+
+      loginWithGoogle: async (credential) => {
+        set({ isLoading: true });
+        try {
+          const { data } = await authApi.googleLogin(credential);
           const { user, token } = data.data;
           localStorage.setItem('token', token);
           set({ user, token, isAuthenticated: true, isLoading: false, isAuthChecked: true });

@@ -8,7 +8,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-sm">S</span>
           </div>
-          <span className="text-lg font-bold text-gray-900 dark:text-white">ShopHub</span>
+          <span className="text-lg font-bold text-gray-900 dark:text-white">SH Shop</span>
         </Link>
       </header>
       <main className="flex-1 flex items-center justify-center px-4 py-8">

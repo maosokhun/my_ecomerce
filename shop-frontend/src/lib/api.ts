@@ -39,6 +39,7 @@ export const authApi = {
     api.post('/auth/login', data),
   facebookLogin: (accessToken: string) =>
     api.post('/auth/facebook', { accessToken }),
+  googleLogin: (credential: string) => api.post('/auth/google', { credential }),
   getMe: () => api.get('/auth/me'),
   updateProfile: (data: Partial<{ name: string; phone: string; avatar: string }>) =>
     api.put('/auth/profile', data),

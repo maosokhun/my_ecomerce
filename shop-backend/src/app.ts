@@ -93,6 +93,7 @@ const authLimiter = rateLimit({
 app.use('/api', limiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/google', authLimiter);
 
 // Health check
 app.get('/', (_req, res) => {

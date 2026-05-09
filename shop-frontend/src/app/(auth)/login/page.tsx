@@ -12,6 +12,7 @@ import type { AppLanguage } from '@/lib/i18n';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import { authApi } from '@/lib/api';
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 
 function loginErrorMessage(error: unknown, lang: AppLanguage): string {
   if (axios.isAxiosError(error)) {
@@ -248,11 +249,8 @@ function LoginForm() {
           {t(language, 'continueWithFacebook')}
         </button>
 
-        {/* Demo credentials */}
-        <div className="mt-4 p-3 bg-gray-50 dark:bg-surface-800 rounded-xl text-xs text-gray-500">
-          <p className="font-medium mb-1">{t(language, 'demoAccounts')}</p>
-          <p>{t(language, 'demoUser')}: user@shop.com / User@12345</p>
-          <p>{t(language, 'demoAdmin')}: admin@shop.com / Admin@12345</p>
+        <div className="mt-3 w-full">
+          <GoogleSignInButton redirectTo={redirect} />
         </div>
 
         <p className="text-center text-sm text-gray-500 mt-5">

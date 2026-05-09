@@ -186,7 +186,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </span>
                 {!compactSidebar && (
                   <span className={`font-semibold text-gray-900 dark:text-white text-[15px] ${isKhmer ? '' : 'tracking-tight'}`}>
-                    ShopHub Admin
+                    SH Shop Admin
                   </span>
                 )}
               </Link>
