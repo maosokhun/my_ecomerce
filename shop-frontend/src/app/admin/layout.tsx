@@ -183,6 +183,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     navItems.find((item) => item.href !== '/admin' && pathname.startsWith(`${item.href}/`)) ||
     (pathname.startsWith('/admin/settings') ? navItems.find((i) => i.href === '/admin/settings') : undefined);
   const pageTitle = adminT(language, currentNav?.key || 'navDashboard');
+  const headerKicker = language === 'km' ? 'មជ្ឈមណ្ឌលគ្រប់គ្រង' : language === 'zh' ? '控制中心' : 'Control Center';
+  const headerHint =
+    language === 'km'
+      ? `${headerKicker} / ${pageTitle}`
+      : language === 'zh'
+        ? `${headerKicker} / ${pageTitle}`
+        : `${headerKicker} / ${pageTitle}`;
 
   return (
     <div
