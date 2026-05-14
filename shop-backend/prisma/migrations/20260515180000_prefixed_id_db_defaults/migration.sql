@@ -44,8 +44,9 @@ BEGIN
     WHERE table_schema = 'public'
       AND table_name = p_table
   ) THEN
+    -- %L::regclass for sequence name: bare %I is parsed as a column on the target table (0A000).
     EXECUTE format(
-      'ALTER TABLE %I.%I ALTER COLUMN id SET DEFAULT next_prefixed_id(%L, %I::regclass)',
+      'ALTER TABLE %I.%I ALTER COLUMN id SET DEFAULT next_prefixed_id(%L, %L::regclass)',
       'public',
       p_table,
       p_prefix,
