@@ -34,6 +34,21 @@ const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
   .map((o) => o.trim())
   .filter(Boolean);
 
+const allowVercelPreviewOrigins = ['1', 'true', 'yes'].includes(
+  String(process.env.CORS_ALLOW_VERCEL || '').trim().toLowerCase()
+);
+
+function isAllowedVercelOrigin(origin: string): boolean {
+  if (!allowVercelPreviewOrigins) return false;
+  try {
+    const { hostname, protocol } = new URL(origin);
+    if (protocol !== 'https:') return false;
+    return hostname === 'vercel.app' || hostname.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
 // Security & middleware
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(
@@ -42,6 +57,7 @@ app.use(
       // Allow non-browser clients and server-to-server requests.
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (isAllowedVercelOrigin(origin)) return callback(null, true);
       // Dev: allow same machine on LAN (e.g. http://192.168.x.x:3000) when testing from phone / network IP.
       if (process.env.NODE_ENV !== 'production' && origin) {
         try {
