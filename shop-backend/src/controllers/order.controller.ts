@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { AuthRequest } from '../middleware/auth';
 import { generateOrderNumber, paginate, paginateResponse } from '../utils/helpers';
 import stripeClient from '../lib/stripe';
+import { assertPaymentIntentMatchesOrder, persistOrderPaidFromStripe } from '../lib/stripeOrderPayment';
 import { getInvoiceDetails, sendInvoiceNotification } from '../lib/invoice';
 import { notifyAdminOrderEvent, notifyAdminOrderStatusChanged, notifyAdminUserCancelledOrder } from '../lib/adminNotifier';
 
@@ -41,6 +42,9 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
 
     const subtotal = cart.items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
     let discount = 0;
+    let orderCouponCode: string | null = null;
+    let orderCouponDiscountType: string | null = null;
+    let orderCouponDiscountValue: number | null = null;
     if (couponCode) {
       const coupon = await prisma.coupon.findUnique({
         where: { code: couponCode.toUpperCase(), isActive: true },
@@ -62,6 +66,9 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         discount = coupon.discount;
       }
       discount = Math.max(0, Math.min(discount, subtotal));
+      orderCouponCode = couponCode.toUpperCase();
+      orderCouponDiscountType = coupon.discountType;
+      orderCouponDiscountValue = coupon.discount;
       await prisma.coupon.update({
         where: { id: coupon.id },
         data: { usedCount: { increment: 1 } },
@@ -124,6 +131,9 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         shippingCarrier,
         shippingAddress: shippingAddress ?? undefined,
         paymentMethod: method,
+        couponCode: orderCouponCode,
+        couponDiscountType: orderCouponDiscountType,
+        couponDiscountValue: orderCouponDiscountValue,
         items: {
           create: cart.items.map((item) => ({
             productId: item.productId,
@@ -153,13 +163,15 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
     // Clear cart
     await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
 
-    // Create Stripe payment intent (optional — skipped if Stripe key not configured)
-    let clientSecret = null;
+    // Create Stripe PaymentIntent for card checkout (optional — skipped if Stripe key not configured)
+    let clientSecret: string | null = null;
+    let stripeUnavailable = false;
     if (method === 'card' && stripeClient) {
       try {
         const paymentIntent = await stripeClient.paymentIntents.create({
           amount: Math.round(total * 100),
           currency: 'usd',
+          automatic_payment_methods: { enabled: true },
           metadata: { orderId: order.id, orderNumber },
         });
 
@@ -169,8 +181,9 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
         });
 
         clientSecret = paymentIntent.client_secret;
-      } catch {
-        // Stripe error — continue without payment intent
+      } catch (err) {
+        console.error('[Stripe] PaymentIntent creation failed:', err);
+        stripeUnavailable = true;
       }
     }
 
@@ -188,6 +201,7 @@ export const createOrder = async (req: AuthRequest, res: Response, next: NextFun
       data: {
         order,
         clientSecret,
+        stripeUnavailable: method === 'card' && !!stripeClient && !clientSecret,
         paymentGuide:
           method === 'bakong'
             ? 'Use your Bakong app to complete payment to merchant KHQR/ID after order placement.'
@@ -359,7 +373,9 @@ export const cancelOrder = async (req: AuthRequest, res: Response, next: NextFun
 
 export const confirmPayment = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { orderId, paymentIntentId } = req.body;
+    const { orderId, paymentIntentId } = req.body as { orderId?: string; paymentIntentId?: string };
+
+    if (!orderId) throw new AppError('orderId is required', 400);
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, userId: req.user!.id },
@@ -367,39 +383,103 @@ export const confirmPayment = async (req: AuthRequest, res: Response, next: Next
 
     if (!order) throw new AppError('Order not found', 404);
 
-    // Verify with Stripe if available
-    if (stripeClient && paymentIntentId) {
-      try {
-        const paymentIntent = await stripeClient.paymentIntents.retrieve(paymentIntentId);
-        if (paymentIntent.status === 'succeeded') {
-          await prisma.order.update({
-            where: { id: orderId },
-            data: { status: 'CONFIRMED', paymentStatus: 'PAID', paymentIntentId },
-          });
-        }
-      } catch {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: 'CONFIRMED', paymentStatus: 'PAID' },
-        });
-      }
-    } else {
-      // No Stripe — mark as paid directly (test mode)
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { status: 'CONFIRMED', paymentStatus: 'PAID' },
-      });
+    if (order.paymentStatus === 'PAID') {
+      res.json({ success: true, message: 'Payment already confirmed' });
+      return;
     }
 
-    // Re-send invoice after payment confirmation to reflect paid status.
-    sendInvoiceNotification(orderId).catch((error) => {
-      console.error('[Invoice] Confirmation notification failed:', error);
-    });
-    notifyAdminOrderEvent(orderId, 'PAYMENT_PAID').catch((error) => {
-      console.error('[Admin Notify] Payment notification failed:', error);
-    });
+    if (stripeClient) {
+      if (!paymentIntentId || paymentIntentId === 'mock_card_payment') {
+        throw new AppError('A valid Stripe payment is required for card orders', 400);
+      }
+      const paymentIntent = await stripeClient.paymentIntents.retrieve(paymentIntentId);
+      assertPaymentIntentMatchesOrder(order, paymentIntent);
+      await persistOrderPaidFromStripe(order.id, paymentIntent.id);
+    } else {
+      if (paymentIntentId && paymentIntentId !== 'mock_card_payment') {
+        throw new AppError('Stripe is not configured on the server', 400);
+      }
+      await persistOrderPaidFromStripe(order.id, paymentIntentId || 'mock_card_payment');
+    }
 
     res.json({ success: true, message: 'Payment confirmed' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createStripePaymentIntentForOrder = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!stripeClient) {
+      throw new AppError('Card payment gateway is not configured', 503);
+    }
+
+    const { orderId } = req.body as { orderId?: string };
+    if (!orderId) throw new AppError('orderId is required', 400);
+
+    const order = await prisma.order.findFirst({
+      where: { id: orderId, userId: req.user!.id },
+    });
+    if (!order) throw new AppError('Order not found', 404);
+    if (order.paymentMethod !== 'card') {
+      throw new AppError('Stripe checkout is only for card orders', 400);
+    }
+    if (order.paymentStatus === 'PAID') {
+      throw new AppError('Order is already paid', 400);
+    }
+    if (order.status === 'CANCELLED' || order.status === 'REFUNDED') {
+      throw new AppError('This order cannot be paid', 400);
+    }
+
+    const amountCents = Math.round(Number(order.total) * 100);
+
+    if (order.paymentIntentId) {
+      try {
+        const existing = await stripeClient.paymentIntents.retrieve(order.paymentIntentId);
+        const resumable = ['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(
+          existing.status
+        );
+        if (
+          resumable &&
+          existing.amount === amountCents &&
+          existing.metadata?.orderId === order.id &&
+          existing.client_secret
+        ) {
+          res.json({
+            success: true,
+            data: { clientSecret: existing.client_secret, paymentIntentId: existing.id },
+          });
+          return;
+        }
+      } catch {
+        /* create a new PaymentIntent below */
+      }
+    }
+
+    const paymentIntent = await stripeClient.paymentIntents.create({
+      amount: amountCents,
+      currency: 'usd',
+      automatic_payment_methods: { enabled: true },
+      metadata: { orderId: order.id, orderNumber: order.orderNumber },
+    });
+
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { paymentIntentId: paymentIntent.id },
+    });
+
+    if (!paymentIntent.client_secret) {
+      throw new AppError('Stripe did not return a client secret', 502);
+    }
+
+    res.json({
+      success: true,
+      data: { clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id },
+    });
   } catch (error) {
     next(error);
   }

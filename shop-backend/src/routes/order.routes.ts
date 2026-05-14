@@ -7,6 +7,7 @@ import {
   getOrderInvoice,
   cancelOrder,
   confirmPayment,
+  createStripePaymentIntentForOrder,
   archiveOrderHistory,
   adminGetOrders,
   adminUpdateOrderStatus,
@@ -23,6 +24,7 @@ router.get('/', getUserOrders);
 
 // Static routes must come BEFORE /:id wildcard routes
 router.post('/confirm-payment', confirmPayment);
+router.post('/stripe-payment-intent', createStripePaymentIntentForOrder);
 
 // Admin routes
 router.get('/admin/all', requireAdmin, adminGetOrders);

@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 import axios from 'axios';
 import { EmptyState } from '@/components/common/EmptyState';
 import { CardPaymentModal } from '@/components/payment/CardPaymentModal';
+import { StripePaymentModal } from '@/components/payment/StripePaymentModal';
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -63,7 +64,12 @@ export default function CheckoutPage() {
     expiresAt: string;
     amount: number;
   } | null>(null);
-  const [cardPaymentOrder, setCardPaymentOrder] = useState<{ id: string; amount: number; orderNumber: string } | null>(null);
+  const [cardPaymentOrder, setCardPaymentOrder] = useState<{
+    id: string;
+    amount: number;
+    orderNumber: string;
+    clientSecret: string | null;
+  } | null>(null);
 
   const { cart, fetchCart } = useCartStore();
   const { isAuthenticated, user, isAuthChecked } = useAuthStore();
@@ -274,10 +280,24 @@ export default function CheckoutPage() {
         });
         toast.success('KHQR generated. Please scan to pay.');
       } else {
+        const stripeUnavailable = Boolean((data.data as { stripeUnavailable?: boolean }).stripeUnavailable);
+        if (stripeUnavailable) {
+          toast.error(
+            language === 'zh'
+              ? '无法初始化银行卡支付，请到订单页重试或联系客服。'
+              : language === 'km'
+                ? 'មិនអាចចាប់ផ្តើមការទូទាត់កាតបានទេ។ សូមទៅកម្មង់របស់អ្នកដើម្បីព្យាយាមម្តងទៀត។'
+                : 'Card payment could not start. Open your order to try again or contact support.'
+          );
+          router.push(`/dashboard/orders/${orderId}`);
+          return;
+        }
+        const clientSecret = (data.data as { clientSecret?: string | null }).clientSecret ?? null;
         setCardPaymentOrder({
           id: orderId,
           amount: data.data.order.total,
-          orderNumber: data.data.order.orderNumber
+          orderNumber: data.data.order.orderNumber,
+          clientSecret,
         });
       }
     } catch (error: unknown) {
@@ -338,10 +358,48 @@ export default function CheckoutPage() {
       });
   }, [shippingCarrier, appliedCoupon?.code]);
 
-  const handleCardPaymentSuccess = async () => {
+  const stripePublishableKey = (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('stripe_return') !== '1') return;
+    const orderId = params.get('order_id');
+    const redirectStatus = params.get('redirect_status');
+    const pi = params.get('payment_intent');
+    if (!orderId || !pi || redirectStatus !== 'succeeded') return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await orderApi.confirmPayment({ orderId, paymentIntentId: pi });
+        const { data } = await orderApi.getById(orderId);
+        if (cancelled) return;
+        const o = data.data as { id: string; orderNumber: string; total: number };
+        setCompletedOrder({ id: o.id, orderNumber: o.orderNumber, total: o.total });
+        setStep(3);
+        await fetchCart();
+        toast.success(
+          language === 'zh' ? '支付已确认' : language === 'km' ? 'ការទូទាត់បានបញ្ជាក់' : 'Payment confirmed'
+        );
+        router.replace('/checkout');
+      } catch {
+        if (!cancelled) {
+          toast.error(
+            language === 'zh' ? '确认支付失败' : language === 'km' ? 'បញ្ជាក់ការទូទាត់បរាជ័យ' : 'Could not confirm payment after redirect'
+          );
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router, fetchCart, language]);
+
+  const handleCardPaymentSuccess = async (paymentIntentId: string = 'mock_card_payment') => {
     if (!cardPaymentOrder) return;
     try {
-      await orderApi.confirmPayment({ orderId: cardPaymentOrder.id, paymentIntentId: 'mock_card_payment' });
+      await orderApi.confirmPayment({ orderId: cardPaymentOrder.id, paymentIntentId });
       setCompletedOrder({
         id: cardPaymentOrder.id,
         orderNumber: cardPaymentOrder.orderNumber,
@@ -349,6 +407,7 @@ export default function CheckoutPage() {
       });
       setStep(3);
       await fetchCart();
+      setCardPaymentOrder(null);
     } catch {
       toast.error('Could not confirm payment server-side.');
       router.push(`/dashboard/orders/${cardPaymentOrder.id}`);
@@ -1012,11 +1071,28 @@ export default function CheckoutPage() {
         </div>
       )}
 
-      {cardPaymentOrder && (
+      {cardPaymentOrder &&
+        cardPaymentOrder.clientSecret &&
+        stripePublishableKey && (
+          <StripePaymentModal
+            isOpen
+            onClose={handleCardModalClose}
+            onSuccess={async (paymentIntentId) => {
+              await handleCardPaymentSuccess(paymentIntentId);
+            }}
+            clientSecret={cardPaymentOrder.clientSecret}
+            returnUrl={`${typeof window !== 'undefined' ? window.location.origin : ''}/checkout?stripe_return=1&order_id=${cardPaymentOrder.id}`}
+            publishableKey={stripePublishableKey}
+            amount={cardPaymentOrder.amount}
+            language={language}
+          />
+        )}
+
+      {cardPaymentOrder && (!cardPaymentOrder.clientSecret || !stripePublishableKey) && (
         <CardPaymentModal
-          isOpen={!!cardPaymentOrder}
+          isOpen
           onClose={handleCardModalClose}
-          onSuccess={handleCardPaymentSuccess}
+          onSuccess={() => handleCardPaymentSuccess('mock_card_payment')}
           amount={cardPaymentOrder.amount}
           language={language}
         />

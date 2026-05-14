@@ -13,6 +13,7 @@ import { t, paymentTypeForInvoice } from '@/lib/i18n';
 import { formatDate, formatPrice, getOrderStatusColor, getPaymentStatusColor } from '@/lib/utils';
 import toast from 'react-hot-toast';
 import { CardPaymentModal } from '@/components/payment/CardPaymentModal';
+import { StripePaymentModal } from '@/components/payment/StripePaymentModal';
 import { shopReceiptMetaFromFooterInfo, type ShopReceiptMeta } from '@/lib/shopContact';
 
 export default function OrderDetailsPage() {
@@ -33,6 +34,7 @@ export default function OrderDetailsPage() {
     amount: number;
   } | null>(null);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [stripeCardSession, setStripeCardSession] = useState<{ clientSecret: string; amount: number } | null>(null);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'card' | 'bakong'>('card');
   const [receiptMeta, setReceiptMeta] = useState<ShopReceiptMeta>(() => shopReceiptMetaFromFooterInfo(null));
 
@@ -284,6 +286,35 @@ export default function OrderDetailsPage() {
   }, [isAuthChecked, isAuthenticated, params.id, router, language]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !isAuthenticated || !isAuthChecked) return;
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('stripe_return') !== '1') return;
+    const pi = q.get('payment_intent');
+    if (q.get('redirect_status') !== 'succeeded' || !pi) return;
+    const id = parseOrderIdFromRoute(String(params.id));
+    let cancelled = false;
+    (async () => {
+      try {
+        await orderApi.confirmPayment({ orderId: id, paymentIntentId: pi });
+        if (cancelled) return;
+        toast.success(language === 'zh' ? '支付已确认' : language === 'km' ? 'ការទូទាត់បានបញ្ជាក់' : 'Payment confirmed');
+        router.replace(window.location.pathname);
+        const { data: orderData } = await orderApi.getById(id);
+        setOrder(orderData.data);
+        const { data: invData } = await orderApi.getInvoice(id, language);
+        setInvoice(invData.data);
+      } catch {
+        if (!cancelled) {
+          toast.error(language === 'zh' ? '确认支付失败' : language === 'km' ? 'បញ្ជាក់បរាជ័យ' : 'Could not confirm payment');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isAuthChecked, params.id, router, language]);
+
+  useEffect(() => {
     settingApi
       .get()
       .then(({ data }) => {
@@ -332,8 +363,19 @@ export default function OrderDetailsPage() {
           amount: data.data.amount,
         });
       } else {
-        // Show mock card payment modal
-        setShowCardModal(true);
+        const pk = (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim();
+        if (pk) {
+          try {
+            const { data } = await orderApi.createStripePaymentIntent(order.id);
+            const secret = data.data?.clientSecret as string | undefined;
+            if (!secret) throw new Error('No client secret');
+            setStripeCardSession({ clientSecret: secret, amount: order.total });
+          } catch {
+            toast.error(language === 'zh' ? '无法开始支付' : language === 'km' ? 'មិនអាចចាប់ផ្តើមការទូទាត់' : 'Failed to start payment');
+          }
+        } else {
+          setShowCardModal(true);
+        }
       }
     } catch {
       toast.error('Failed to initiate payment');
@@ -362,12 +404,13 @@ export default function OrderDetailsPage() {
     }
   };
 
-  const handleCardPaymentSuccess = async () => {
+  const handleCardPaymentSuccess = async (paymentIntentId: string = 'mock_card_payment') => {
     if (!order) return;
     try {
-      await orderApi.confirmPayment({ orderId: order.id, paymentIntentId: 'mock_card_payment' });
+      await orderApi.confirmPayment({ orderId: order.id, paymentIntentId });
       toast.success('Payment confirmed!');
-      // Refresh order data
+      setShowCardModal(false);
+      setStripeCardSession(null);
       const { data: orderData } = await orderApi.getById(order.id);
       setOrder(orderData.data);
       const { data: invData } = await orderApi.getInvoice(order.id, language);
@@ -684,11 +727,30 @@ export default function OrderDetailsPage() {
         </div>
       )}
 
-      {showCardModal && order && (
+      {stripeCardSession && order && (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim() && (
+        <StripePaymentModal
+          isOpen
+          onClose={() => setStripeCardSession(null)}
+          onSuccess={async (paymentIntentId) => {
+            await handleCardPaymentSuccess(paymentIntentId);
+          }}
+          clientSecret={stripeCardSession.clientSecret}
+          returnUrl={
+            typeof window !== 'undefined'
+              ? `${window.location.origin}${window.location.pathname}?stripe_return=1`
+              : ''
+          }
+          publishableKey={(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '').trim()}
+          amount={stripeCardSession.amount}
+          language={language}
+        />
+      )}
+
+      {showCardModal && order && !stripeCardSession && (
         <CardPaymentModal
           isOpen={showCardModal}
           onClose={() => setShowCardModal(false)}
-          onSuccess={handleCardPaymentSuccess}
+          onSuccess={() => handleCardPaymentSuccess('mock_card_payment')}
           amount={order.total}
           language={language}
         />

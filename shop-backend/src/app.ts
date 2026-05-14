@@ -24,6 +24,7 @@ import supportRoutes from './routes/support.routes';
 import leadRoutes from './routes/lead.routes';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { checkDatabaseHealth } from './lib/prisma';
+import { handleStripeWebhook } from './controllers/stripeWebhook.controller';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -67,6 +68,8 @@ app.use(cookieParser());
 
 /** Product images uploaded when Cloudinary is off — URL path is /uploads/{folder}/{file} */
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+/** Stripe webhooks require the raw body for signature verification (must be before express.json). */
+app.post('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 /** JSON bodies only; file uploads use multipart with separate limits. */
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));

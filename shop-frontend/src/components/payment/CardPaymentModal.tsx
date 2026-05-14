@@ -116,7 +116,6 @@ export function CardPaymentModal({ isOpen, onClose, onSuccess, amount, language 
       setIsSuccess(true);
       await new Promise(resolve => setTimeout(resolve, 1500));
       await onSuccess();
-      onClose();
     } catch {
       setError('Payment failed. Please try again.');
       setIsProcessing(false);

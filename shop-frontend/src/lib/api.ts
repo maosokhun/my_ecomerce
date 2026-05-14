@@ -123,6 +123,8 @@ export const orderApi = {
   archiveHistory: (id: string) => api.delete(`/orders/${id}/history`),
   confirmPayment: (data: { orderId: string; paymentIntentId: string }) =>
     api.post('/orders/confirm-payment', data),
+  createStripePaymentIntent: (orderId: string) =>
+    api.post('/orders/stripe-payment-intent', { orderId }),
   // Admin
   adminGetAll: (params?: Record<string, unknown>) => api.get('/orders/admin/all', { params }),
   adminUpdateStatus: (id: string, data: unknown) =>
