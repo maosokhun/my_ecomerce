@@ -13,6 +13,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
+    "prisma:migrate:resolve-rolled-back:prefixed-ids": "prisma migrate resolve --rolled-back 20260515180000_prefixed_id_db_defaults",
     "prisma:studio": "prisma studio",
     "seed": "ts-node prisma/seed.ts"
   },
